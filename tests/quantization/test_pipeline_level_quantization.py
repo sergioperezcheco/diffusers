@@ -116,8 +116,7 @@ class TestPipelineQuantization:
             )
 
         assert (
-            str(err_context.value)
-            == "Both `quant_backend` and `quant_mapping` cannot be specified at the same time."
+            str(err_context.value) == "Both `quant_backend` and `quant_mapping` cannot be specified at the same time."
         )
 
     def test_validation_for_kwargs(self):
@@ -129,9 +128,7 @@ class TestPipelineQuantization:
                 components_to_quantize=components_to_quantize,
             )
 
-        assert (
-            "The signatures of the __init__ methods of the quantization config classes" in str(err_context.value)
-        )
+        assert "The signatures of the __init__ methods of the quantization config classes" in str(err_context.value)
 
     def test_raises_error_for_wrong_config_class(self):
         quant_config = {
@@ -144,9 +141,7 @@ class TestPipelineQuantization:
                 quantization_config=quant_config,
                 torch_dtype=torch.bfloat16,
             )
-        assert (
-            str(err_context.value) == "`quantization_config` must be an instance of `PipelineQuantizationConfig`."
-        )
+        assert str(err_context.value) == "`quantization_config` must be an instance of `PipelineQuantizationConfig`."
 
     def test_validation_for_mapping(self):
         with pytest.raises(ValueError) as err_context:
