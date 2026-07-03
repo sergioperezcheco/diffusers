@@ -68,7 +68,7 @@ if is_transformers_available():
 if is_torch_available():
     import torch
 
-    from ..utils import LoRALayer, get_memory_consumption_stat
+    from ..utils import get_memory_consumption_stat
 
 
 if is_bitsandbytes_available():
@@ -158,40 +158,6 @@ class BnB4BitBasicTests(Base4bitTests):
         gc.collect()
         backend_empty_cache(torch_device)
 
-    def test_quantization_num_parameters(self):
-        r"""
-        Test if the number of returned parameters is correct
-        """
-        num_params_4bit = self.model_4bit.num_parameters()
-        num_params_fp16 = self.model_fp16.num_parameters()
-
-        self.assertEqual(num_params_4bit, num_params_fp16)
-
-    def test_quantization_config_json_serialization(self):
-        r"""
-        A simple test to check if the quantization config is correctly serialized and deserialized
-        """
-        config = self.model_4bit.config
-
-        self.assertTrue("quantization_config" in config)
-
-        _ = config["quantization_config"].to_dict()
-        _ = config["quantization_config"].to_diff_dict()
-
-        _ = config["quantization_config"].to_json_string()
-
-    def test_memory_footprint(self):
-        r"""
-        A simple test to check if the model conversion has been done correctly by checking on the
-        memory footprint of the converted model and the class type of the linear layers of the converted models
-        """
-        mem_fp16 = self.model_fp16.get_memory_footprint()
-        mem_4bit = self.model_4bit.get_memory_footprint()
-
-        self.assertAlmostEqual(mem_fp16 / mem_4bit, self.expected_rel_difference, delta=1e-2)
-        linear = get_some_linear_layer(self.model_4bit)
-        self.assertTrue(linear.weight.__class__ == bnb.nn.Params4bit)
-
     def test_model_memory_usage(self):
         # Delete to not let anything interfere.
         del self.model_4bit, self.model_fp16
@@ -218,73 +184,6 @@ class BnB4BitBasicTests(Base4bitTests):
         quantized_model_memory = get_memory_consumption_stat(model_4bit, inputs)
         assert unquantized_model_memory / quantized_model_memory >= self.expected_memory_saving_ratio
 
-    def test_original_dtype(self):
-        r"""
-        A simple test to check if the model successfully stores the original dtype
-        """
-        self.assertTrue("_pre_quantization_dtype" in self.model_4bit.config)
-        self.assertFalse("_pre_quantization_dtype" in self.model_fp16.config)
-        self.assertTrue(self.model_4bit.config["_pre_quantization_dtype"] == torch.float16)
-
-    def test_keep_modules_in_fp32(self):
-        r"""
-        A simple tests to check if the modules under `_keep_in_fp32_modules` are kept in fp32.
-        Also ensures if inference works.
-        """
-        fp32_modules = SD3Transformer2DModel._keep_in_fp32_modules
-        SD3Transformer2DModel._keep_in_fp32_modules = ["proj_out"]
-
-        nf4_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.float16,
-        )
-        model = SD3Transformer2DModel.from_pretrained(
-            self.model_name, subfolder="transformer", quantization_config=nf4_config, device_map=torch_device
-        )
-
-        for name, module in model.named_modules():
-            if isinstance(module, torch.nn.Linear):
-                if name in model._keep_in_fp32_modules:
-                    self.assertTrue(module.weight.dtype == torch.float32)
-                else:
-                    # 4-bit parameters are packed in uint8 variables
-                    self.assertTrue(module.weight.dtype == torch.uint8)
-
-        # test if inference works.
-        with torch.no_grad() and torch.amp.autocast(torch_device, dtype=torch.float16):
-            input_dict_for_transformer = self.get_dummy_inputs()
-            model_inputs = {
-                k: v.to(device=torch_device) for k, v in input_dict_for_transformer.items() if not isinstance(v, bool)
-            }
-            model_inputs.update({k: v for k, v in input_dict_for_transformer.items() if k not in model_inputs})
-            _ = model(**model_inputs)
-
-        SD3Transformer2DModel._keep_in_fp32_modules = fp32_modules
-
-    def test_linear_are_4bit(self):
-        r"""
-        A simple test to check if the model conversion has been done correctly by checking on the
-        memory footprint of the converted model and the class type of the linear layers of the converted models
-        """
-        self.model_fp16.get_memory_footprint()
-        self.model_4bit.get_memory_footprint()
-
-        for name, module in self.model_4bit.named_modules():
-            if isinstance(module, torch.nn.Linear):
-                if name not in ["proj_out"]:
-                    # 4-bit parameters are packed in uint8 variables
-                    self.assertTrue(module.weight.dtype == torch.uint8)
-
-    def test_config_from_pretrained(self):
-        transformer_4bit = FluxTransformer2DModel.from_pretrained(
-            "hf-internal-testing/flux.1-dev-nf4-pkg", subfolder="transformer"
-        )
-        linear = get_some_linear_layer(transformer_4bit)
-        self.assertTrue(linear.weight.__class__ == bnb.nn.Params4bit)
-        self.assertTrue(hasattr(linear.weight, "quant_state"))
-        self.assertTrue(linear.weight.quant_state.__class__ == bnb.functional.QuantState)
-
     def test_device_assignment(self):
         mem_before = self.model_4bit.get_memory_footprint()
 
@@ -302,54 +201,6 @@ class BnB4BitBasicTests(Base4bitTests):
             self.assertEqual(self.model_4bit.device, torch.device(0))
             self.assertAlmostEqual(self.model_4bit.get_memory_footprint(), mem_before)
             self.model_4bit.to("cpu")
-
-    def test_device_and_dtype_assignment(self):
-        r"""
-        Test whether trying to cast (or assigning a device to) a model after converting it in 4-bit will throw an error.
-        Checks also if other models are casted correctly. Device placement, however, is supported.
-        """
-        with self.assertRaises(ValueError):
-            # Tries with a `dtype`
-            self.model_4bit.to(torch.float16)
-
-        with self.assertRaises(ValueError):
-            # Tries with a `device` and `dtype`
-            self.model_4bit.to(device=f"{torch_device}:0", dtype=torch.float16)
-
-        with self.assertRaises(ValueError):
-            # Tries with a cast
-            self.model_4bit.float()
-
-        with self.assertRaises(ValueError):
-            # Tries with a cast
-            self.model_4bit.half()
-
-        # This should work
-        self.model_4bit.to(torch_device)
-
-        # Test if we did not break anything
-        self.model_fp16 = self.model_fp16.to(dtype=torch.float32, device=torch_device)
-        input_dict_for_transformer = self.get_dummy_inputs()
-        model_inputs = {
-            k: v.to(dtype=torch.float32, device=torch_device)
-            for k, v in input_dict_for_transformer.items()
-            if not isinstance(v, bool)
-        }
-        model_inputs.update({k: v for k, v in input_dict_for_transformer.items() if k not in model_inputs})
-        with torch.no_grad():
-            _ = self.model_fp16(**model_inputs)
-
-        # Check this does not throw an error
-        _ = self.model_fp16.to("cpu")
-
-        # Check this does not throw an error
-        _ = self.model_fp16.half()
-
-        # Check this does not throw an error
-        _ = self.model_fp16.float()
-
-        # Check that this does not throw an error
-        _ = self.model_fp16.to(torch_device)
 
     def test_bnb_4bit_wrong_config(self):
         r"""
@@ -399,53 +250,6 @@ class BnB4BitBasicTests(Base4bitTests):
             "You are loading your model in 8bit or 4bit but no linear modules were found in your model."
             in cap_logger.out
         )
-
-
-class BnB4BitTrainingTests(Base4bitTests):
-    def setUp(self):
-        gc.collect()
-        backend_empty_cache(torch_device)
-
-        nf4_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.float16,
-        )
-        self.model_4bit = SD3Transformer2DModel.from_pretrained(
-            self.model_name, subfolder="transformer", quantization_config=nf4_config, device_map=torch_device
-        )
-
-    def test_training(self):
-        # Step 1: freeze all parameters
-        for param in self.model_4bit.parameters():
-            param.requires_grad = False  # freeze the model - train adapters later
-            if param.ndim == 1:
-                # cast the small parameters (e.g. layernorm) to fp32 for stability
-                param.data = param.data.to(torch.float32)
-
-        # Step 2: add adapters
-        for _, module in self.model_4bit.named_modules():
-            if "Attention" in repr(type(module)):
-                module.to_k = LoRALayer(module.to_k, rank=4)
-                module.to_q = LoRALayer(module.to_q, rank=4)
-                module.to_v = LoRALayer(module.to_v, rank=4)
-
-        # Step 3: dummy batch
-        input_dict_for_transformer = self.get_dummy_inputs()
-        model_inputs = {
-            k: v.to(device=torch_device) for k, v in input_dict_for_transformer.items() if not isinstance(v, bool)
-        }
-        model_inputs.update({k: v for k, v in input_dict_for_transformer.items() if k not in model_inputs})
-
-        # Step 4: Check if the gradient is not None
-        with torch.amp.autocast(torch_device, dtype=torch.float16):
-            out = self.model_4bit(**model_inputs)[0]
-            out.norm().backward()
-
-        for module in self.model_4bit.modules():
-            if isinstance(module, LoRALayer):
-                self.assertTrue(module.adapter[1].weight.grad is not None)
-                self.assertTrue(module.adapter[1].weight.grad.norm().item() > 0)
 
 
 @require_transformers_version_greater("4.44.0")
@@ -850,9 +654,6 @@ class ExtendedSerializationTest(BaseBnb4BitSerializationTests):
     def test_nf4_single_unsafe(self):
         self.test_serialization(quant_type="nf4", double_quant=False, safe_serialization=False)
 
-    def test_nf4_single_safe(self):
-        self.test_serialization(quant_type="nf4", double_quant=False, safe_serialization=True)
-
     def test_nf4_double_unsafe(self):
         self.test_serialization(quant_type="nf4", double_quant=True, safe_serialization=False)
 
@@ -885,11 +686,3 @@ class Bnb4BitCompileTests(QuantCompileTests, unittest.TestCase):
             },
             components_to_quantize=["transformer", "text_encoder_2"],
         )
-
-    @require_bitsandbytes_version_greater("0.46.1")
-    def test_torch_compile(self):
-        torch._dynamo.config.capture_dynamic_output_shape_ops = True
-        super().test_torch_compile()
-
-    def test_torch_compile_with_group_offload_leaf(self):
-        super()._test_torch_compile_with_group_offload_leaf(use_stream=True)

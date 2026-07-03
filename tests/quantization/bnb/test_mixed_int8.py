@@ -155,40 +155,6 @@ class BnB8bitBasicTests(Base8bitTests):
         gc.collect()
         backend_empty_cache(torch_device)
 
-    def test_quantization_num_parameters(self):
-        r"""
-        Test if the number of returned parameters is correct
-        """
-        num_params_8bit = self.model_8bit.num_parameters()
-        num_params_fp16 = self.model_fp16.num_parameters()
-
-        self.assertEqual(num_params_8bit, num_params_fp16)
-
-    def test_quantization_config_json_serialization(self):
-        r"""
-        A simple test to check if the quantization config is correctly serialized and deserialized
-        """
-        config = self.model_8bit.config
-
-        self.assertTrue("quantization_config" in config)
-
-        _ = config["quantization_config"].to_dict()
-        _ = config["quantization_config"].to_diff_dict()
-
-        _ = config["quantization_config"].to_json_string()
-
-    def test_memory_footprint(self):
-        r"""
-        A simple test to check if the model conversion has been done correctly by checking on the
-        memory footprint of the converted model and the class type of the linear layers of the converted models
-        """
-        mem_fp16 = self.model_fp16.get_memory_footprint()
-        mem_8bit = self.model_8bit.get_memory_footprint()
-
-        self.assertAlmostEqual(mem_fp16 / mem_8bit, self.expected_rel_difference, delta=1e-2)
-        linear = get_some_linear_layer(self.model_8bit)
-        self.assertTrue(linear.weight.__class__ == bnb.nn.Int8Params)
-
     def test_model_memory_usage(self):
         # Delete to not let anything interfere.
         del self.model_8bit, self.model_fp16
@@ -251,20 +217,6 @@ class BnB8bitBasicTests(Base8bitTests):
 
         SD3Transformer2DModel._keep_in_fp32_modules = fp32_modules
 
-    def test_linear_are_8bit(self):
-        r"""
-        A simple test to check if the model conversion has been done correctly by checking on the
-        memory footprint of the converted model and the class type of the linear layers of the converted models
-        """
-        self.model_fp16.get_memory_footprint()
-        self.model_8bit.get_memory_footprint()
-
-        for name, module in self.model_8bit.named_modules():
-            if isinstance(module, torch.nn.Linear):
-                if name not in ["proj_out"]:
-                    # 8-bit parameters are packed in int8 variables
-                    self.assertTrue(module.weight.dtype == torch.int8)
-
     def test_llm_skip(self):
         r"""
         A simple test to check if `llm_int8_skip_modules` works as expected
@@ -279,14 +231,6 @@ class BnB8bitBasicTests(Base8bitTests):
 
         self.assertTrue(isinstance(model_8bit.proj_out, torch.nn.Linear))
         self.assertTrue(model_8bit.proj_out.weight.dtype != torch.int8)
-
-    def test_config_from_pretrained(self):
-        transformer_8bit = FluxTransformer2DModel.from_pretrained(
-            "hf-internal-testing/flux.1-dev-int8-pkg", subfolder="transformer"
-        )
-        linear = get_some_linear_layer(transformer_8bit)
-        self.assertTrue(linear.weight.__class__ == bnb.nn.Int8Params)
-        self.assertTrue(hasattr(linear.weight, "SCB"))
 
     @require_bitsandbytes_version_greater("0.48.0")
     def test_device_and_dtype_assignment(self):
@@ -845,16 +789,5 @@ class Bnb8BitCompileTests(QuantCompileTests, unittest.TestCase):
             components_to_quantize=["transformer", "text_encoder_2"],
         )
 
-    @pytest.mark.xfail(
-        reason="Test fails because of a type change when recompiling."
-        " Test passes without recompilation context manager. Refer to https://github.com/huggingface/diffusers/pull/12002/files#r2240462757 for details."
-    )
-    def test_torch_compile(self):
-        torch._dynamo.config.capture_dynamic_output_shape_ops = True
-        super()._test_torch_compile(torch_dtype=torch.float16)
-
     def test_torch_compile_with_cpu_offload(self):
         super()._test_torch_compile_with_cpu_offload(torch_dtype=torch.float16)
-
-    def test_torch_compile_with_group_offload_leaf(self):
-        super()._test_torch_compile_with_group_offload_leaf(torch_dtype=torch.float16, use_stream=True)

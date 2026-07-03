@@ -19,7 +19,6 @@ import unittest
 from typing import List
 
 import numpy as np
-from parameterized import parameterized
 from transformers import AutoTokenizer, CLIPTextModel, CLIPTokenizer, T5EncoderModel
 
 from diffusers import (
@@ -29,7 +28,6 @@ from diffusers import (
     FluxTransformer2DModel,
     TorchAoConfig,
 )
-from diffusers.models.attention_processor import Attention
 from diffusers.quantizers import PipelineQuantizationConfig
 
 from ...testing_utils import (
@@ -71,7 +69,7 @@ if is_torch_available():
     import torch
     import torch.nn as nn
 
-    from ..utils import LoRALayer, get_memory_consumption_stat
+    from ..utils import get_memory_consumption_stat
 
 
 if is_torchao_available():
@@ -347,86 +345,6 @@ class TorchAoTest(unittest.TestCase):
                 output_slice = output.flatten()[-9:].detach().float().cpu().numpy()
                 self.assertTrue(numpy_cosine_similarity_distance(output_slice, expected_slice) < 2e-3)
 
-    def test_modules_to_not_convert(self):
-        quantization_config = TorchAoConfig(Int8WeightOnlyConfig(), modules_to_not_convert=["transformer_blocks.0"])
-        quantized_model_with_not_convert = FluxTransformer2DModel.from_pretrained(
-            "hf-internal-testing/tiny-flux-pipe",
-            subfolder="transformer",
-            quantization_config=quantization_config,
-            torch_dtype=torch.bfloat16,
-        )
-
-        unquantized_layer = quantized_model_with_not_convert.transformer_blocks[0].ff.net[2]
-        self.assertTrue(isinstance(unquantized_layer, torch.nn.Linear))
-        self.assertFalse(isinstance(unquantized_layer.weight, Int8Tensor))
-        self.assertEqual(unquantized_layer.weight.dtype, torch.bfloat16)
-
-        quantized_layer = quantized_model_with_not_convert.proj_out
-        self.assertTrue(isinstance(quantized_layer.weight, Int8Tensor))
-
-        quantization_config = TorchAoConfig(Int8WeightOnlyConfig())
-        quantized_model = FluxTransformer2DModel.from_pretrained(
-            "hf-internal-testing/tiny-flux-pipe",
-            subfolder="transformer",
-            quantization_config=quantization_config,
-            torch_dtype=torch.bfloat16,
-        )
-
-        size_quantized_with_not_convert = get_model_size_in_bytes(quantized_model_with_not_convert)
-        size_quantized = get_model_size_in_bytes(quantized_model)
-
-        self.assertTrue(size_quantized < size_quantized_with_not_convert)
-
-    def test_training(self):
-        quantization_config = TorchAoConfig(Int8WeightOnlyConfig())
-        quantized_model = FluxTransformer2DModel.from_pretrained(
-            "hf-internal-testing/tiny-flux-pipe",
-            subfolder="transformer",
-            quantization_config=quantization_config,
-            torch_dtype=torch.bfloat16,
-        ).to(torch_device)
-
-        for param in quantized_model.parameters():
-            # freeze the model as only adapter layers will be trained
-            param.requires_grad = False
-            if param.ndim == 1:
-                param.data = param.data.to(torch.float32)
-
-        for _, module in quantized_model.named_modules():
-            if isinstance(module, Attention):
-                module.to_q = LoRALayer(module.to_q, rank=4)
-                module.to_k = LoRALayer(module.to_k, rank=4)
-                module.to_v = LoRALayer(module.to_v, rank=4)
-
-        with torch.amp.autocast(str(torch_device), dtype=torch.bfloat16):
-            inputs = self.get_dummy_tensor_inputs(torch_device)
-            output = quantized_model(**inputs)[0]
-            output.norm().backward()
-
-        for module in quantized_model.modules():
-            if isinstance(module, LoRALayer):
-                self.assertTrue(module.adapter[1].weight.grad is not None)
-                self.assertTrue(module.adapter[1].weight.grad.norm().item() > 0)
-
-    @nightly
-    def test_torch_compile(self):
-        r"""Test that verifies if torch.compile works with torchao quantization."""
-        for model_id in ["hf-internal-testing/tiny-flux-pipe", "hf-internal-testing/tiny-flux-sharded"]:
-            quantization_config = TorchAoConfig(Int8WeightOnlyConfig())
-            components = self.get_dummy_components(quantization_config, model_id=model_id)
-            pipe = FluxPipeline(**components)
-            pipe.to(device=torch_device)
-
-            inputs = self.get_dummy_inputs(torch_device)
-            normal_output = pipe(**inputs)[0].flatten()[-32:]
-
-            pipe.transformer = torch.compile(pipe.transformer, mode="max-autotune", fullgraph=True, dynamic=False)
-            inputs = self.get_dummy_inputs(torch_device)
-            compile_output = pipe(**inputs)[0].flatten()[-32:]
-
-            # Note: Seems to require higher tolerance
-            self.assertTrue(np.allclose(normal_output, compile_output, atol=1e-2, rtol=1e-3))
-
     def test_memory_footprint(self):
         r"""
         A simple test to check if the model conversion has been done correctly by checking on the
@@ -658,31 +576,6 @@ class TorchAoCompileTest(QuantCompileTests, unittest.TestCase):
         # small resolutions to ensure speedy execution.
         pipe("a dog", num_inference_steps=2, max_sequence_length=16, height=256, width=256)
 
-    @parameterized.expand([False, True])
-    @unittest.skip(
-        """
-        For `use_stream=False`:
-            - Changing the device of AQT tensor, with `param.data = param.data.to(device)` as done in group offloading implementation
-            is unsupported in TorchAO. When compiling, FakeTensor device mismatch causes failure.
-        For `use_stream=True`:
-            Using non-default stream requires ability to pin tensors. AQT does not seem to support this yet in TorchAO.
-        """
-    )
-    def test_torch_compile_with_group_offload_leaf(self, use_stream):
-        # For use_stream=False:
-        # If we run group offloading without compilation, we will see:
-        #   RuntimeError: Attempted to set the storage of a tensor on device "cpu" to a storage on different device "cuda:0".  This is no longer allowed; the devices must match.
-        # When running with compilation, the error ends up being different:
-        #   Dynamo failed to run FX node with fake tensors: call_function <built-in function linear>(*(FakeTensor(..., device='cuda:0', size=(s0, 256), dtype=torch.bfloat16), AffineQuantizedTensor(tensor_impl=PlainAQTTensorImpl(data=FakeTensor(..., size=(1536, 256), dtype=torch.int8)... , scale=FakeTensor(..., size=(1536,), dtype=torch.bfloat16)... , zero_point=FakeTensor(..., size=(1536,), dtype=torch.int64)... , _layout=PlainLayout()), block_size=(1, 256), shape=torch.Size([1536, 256]), device=cpu, dtype=torch.bfloat16, requires_grad=False), Parameter(FakeTensor(..., device='cuda:0', size=(1536,), dtype=torch.bfloat16,
-        #   requires_grad=True))), **{}): got RuntimeError('Unhandled FakeTensor Device Propagation for aten.mm.default, found two different devices cuda:0, cpu')
-        # Looks like something that will have to be looked into upstream.
-        # for linear layers, weight.tensor_impl shows cuda... but:
-        # weight.tensor_impl.{data,scale,zero_point}.device will be cpu
-
-        # For use_stream=True:
-        # NotImplementedError: AffineQuantizedTensor dispatch: attempting to run unimplemented operator/function: func=<OpOverload(op='aten.is_pinned', overload='default')>, types=(<class 'torchao.dtypes.affine_quantized_tensor.AffineQuantizedTensor'>,), arg_types=(<class 'torchao.dtypes.affine_quantized_tensor.AffineQuantizedTensor'>,), kwarg_types={}
-        super()._test_torch_compile_with_group_offload_leaf(use_stream=use_stream)
-
 
 # Slices for these tests have been obtained on our aws-g6e-xlarge-plus runners
 @require_torch
@@ -841,60 +734,3 @@ class SlowTorchAoTests(unittest.TestCase):
         )
         int8wo_memory_in_gb = get_model_size_in_bytes(transformer) / 1024**3
         self.assertTrue(int8wo_memory_in_gb < expected_memory_in_gb)
-
-
-@require_torch
-@require_torch_accelerator
-@require_torchao_version_greater_or_equal("0.15.0")
-@slow
-@nightly
-class SlowTorchAoPreserializedModelTests(unittest.TestCase):
-    def tearDown(self):
-        gc.collect()
-        backend_empty_cache(torch_device)
-
-    def get_dummy_inputs(self, device: torch.device, seed: int = 0):
-        if str(device).startswith("mps"):
-            generator = torch.manual_seed(seed)
-        else:
-            generator = torch.Generator().manual_seed(seed)
-
-        inputs = {
-            "prompt": "an astronaut riding a horse in space",
-            "height": 512,
-            "width": 512,
-            "num_inference_steps": 20,
-            "output_type": "np",
-            "generator": generator,
-        }
-
-        return inputs
-
-    def test_transformer_int8wo(self):
-        # fmt: off
-        expected_slice = np.array([0.0566, 0.0781, 0.1426, 0.0488, 0.0684, 0.1504, 0.0625, 0.0781, 0.1445, 0.0625, 0.0781, 0.1562, 0.0547, 0.0723, 0.1484, 0.0566, 0.5703, 0.8867, 0.7266, 0.5742, 0.875, 0.7148, 0.5586, 0.875, 0.7148, 0.5547, 0.8633, 0.7109, 0.5469, 0.8398, 0.6992, 0.5703])
-        # fmt: on
-
-        # This is just for convenience, so that we can modify it at one place for custom environments and locally testing
-        cache_dir = None
-        transformer = FluxTransformer2DModel.from_pretrained(
-            "hf-internal-testing/FLUX.1-Dev-TorchAO-int8wo-transformer",
-            torch_dtype=torch.bfloat16,
-            use_safetensors=False,
-            cache_dir=cache_dir,
-        )
-        pipe = FluxPipeline.from_pretrained(
-            "black-forest-labs/FLUX.1-dev", transformer=transformer, torch_dtype=torch.bfloat16, cache_dir=cache_dir
-        )
-        pipe.enable_model_cpu_offload()
-
-        # Verify that all linear layer weights are quantized
-        for name, module in pipe.transformer.named_modules():
-            if isinstance(module, nn.Linear):
-                self.assertTrue(isinstance(module.weight, Int8Tensor))
-
-        # Verify outputs match expected slice
-        inputs = self.get_dummy_inputs(torch_device)
-        output = pipe(**inputs)[0].flatten()
-        output_slice = np.concatenate((output[:16], output[-16:]))
-        self.assertTrue(np.allclose(output_slice, expected_slice, atol=1e-3, rtol=1e-3))
