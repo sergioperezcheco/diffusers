@@ -120,7 +120,8 @@ class BasePipelineTesterConfig:
     # ==================== Shared helpers ====================
 
     def get_generator(self, seed):
-        return torch.Generator("cpu").manual_seed(seed)
+        device = torch_device if torch_device != "mps" else "cpu"
+        return torch.Generator(device).manual_seed(seed)
 
     # ==================== Fixtures ====================
 
