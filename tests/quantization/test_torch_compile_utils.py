@@ -14,6 +14,7 @@
 # limitations under the License.
 import gc
 
+import pytest
 import torch
 
 from diffusers import DiffusionPipeline
@@ -30,14 +31,12 @@ class QuantCompileTests:
             "This property should be implemented in the subclass to return the appropriate quantization config."
         )
 
-    def setUp(self):
-        super().setUp()
+    @pytest.fixture(autouse=True)
+    def _cleanup(self):
         gc.collect()
         backend_empty_cache(torch_device)
         torch.compiler.reset()
-
-    def tearDown(self):
-        super().tearDown()
+        yield
         gc.collect()
         backend_empty_cache(torch_device)
         torch.compiler.reset()
