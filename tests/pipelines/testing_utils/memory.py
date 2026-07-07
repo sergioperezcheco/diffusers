@@ -287,18 +287,18 @@ class PipelineOffloadTesterMixin:
 
 
 class LayerwiseCastingTesterMixin:
-    """Layerwise FP8 casting during pipeline inference (gated by `test_layerwise_casting`)."""
+    """Layerwise FP8 casting during pipeline inference."""
 
     def test_layerwise_casting_inference(self):
-        if not self.test_layerwise_casting:
-            return
-
         components = self.get_dummy_components()
         pipe = self.pipeline_class(**components)
+        denoiser = getattr(pipe, "transformer", None) or getattr(pipe, "unet", None)
+        if denoiser is None or not hasattr(denoiser, "enable_layerwise_casting"):
+            pytest.skip(f"{self.pipeline_class.__name__} has no denoiser that supports layerwise casting.")
+
         pipe.to(torch_device, dtype=torch.bfloat16)
         pipe.set_progress_bar_config(disable=None)
 
-        denoiser = pipe.transformer if hasattr(pipe, "transformer") else pipe.unet
         denoiser.enable_layerwise_casting(storage_dtype=torch.float8_e4m3fn, compute_dtype=torch.bfloat16)
 
         inputs = self.get_dummy_inputs(torch_device)
@@ -311,8 +311,11 @@ class GroupOffloadTesterMixin:
 
     @require_torch_accelerator
     def test_group_offloading_inference(self):
-        if not self.test_group_offloading:
-            return
+        components = self.get_dummy_components()
+        pipe = self.pipeline_class(**components)
+        for name, component in pipe.components.items():
+            if hasattr(component, "_supports_group_offloading") and not component._supports_group_offloading:
+                pytest.skip(f"{self.pipeline_class.__name__} has a component that does not support group offloading.")
 
         def create_pipe():
             torch.manual_seed(0)

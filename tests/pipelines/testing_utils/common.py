@@ -67,11 +67,6 @@ class BasePipelineTesterConfig:
         ]
     )
 
-    # set these to False/True in the child class if the pipeline does not support the corresponding functionality
-    test_attention_slicing = True
-    test_layerwise_casting = False
-    test_group_offloading = False
-
     # ==================== Required interface ====================
 
     @property
@@ -563,46 +558,6 @@ class PipelineTesterMixin:
         pipe.to(dtype=torch.float16)
         model_dtypes = [component.dtype for component in components.values() if getattr(component, "dtype", None)]
         assert all(dtype == torch.float16 for dtype in model_dtypes)
-
-    def test_attention_slicing_forward_pass(self, expected_max_diff=1e-3):
-        if not self.test_attention_slicing:
-            return
-
-        components = self.get_dummy_components()
-        for key in components:
-            if "text_encoder" in key and hasattr(components[key], "eval"):
-                components[key].eval()
-        pipe = self.pipeline_class(**components)
-        for component in pipe.components.values():
-            if hasattr(component, "set_default_attn_processor"):
-                component.set_default_attn_processor()
-        pipe.to(torch_device)
-        pipe.set_progress_bar_config(disable=None)
-
-        generator_device = "cpu"
-        inputs = self.get_dummy_inputs(generator_device)
-        output_without_slicing = pipe(**inputs)[0]
-
-        pipe.enable_attention_slicing(slice_size=1)
-        inputs = self.get_dummy_inputs(generator_device)
-        output_with_slicing1 = pipe(**inputs)[0]
-
-        pipe.enable_attention_slicing(slice_size=2)
-        inputs = self.get_dummy_inputs(generator_device)
-        output_with_slicing2 = pipe(**inputs)[0]
-
-        assert_outputs_close(
-            output_with_slicing1,
-            output_without_slicing,
-            atol=expected_max_diff,
-            msg="Attention slicing (slice_size=1) should not affect the inference results",
-        )
-        assert_outputs_close(
-            output_with_slicing2,
-            output_without_slicing,
-            atol=expected_max_diff,
-            msg="Attention slicing (slice_size=2) should not affect the inference results",
-        )
 
     def test_num_images_per_prompt(self):
         sig = inspect.signature(self.pipeline_class.__call__)

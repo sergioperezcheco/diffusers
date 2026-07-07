@@ -42,9 +42,6 @@ class FluxPipelineTesterConfig(BasePipelineTesterConfig):
     params = frozenset(["prompt", "height", "width", "guidance_scale", "prompt_embeds", "pooled_prompt_embeds"])
     batch_params = frozenset(["prompt"])
 
-    test_layerwise_casting = True
-    test_group_offloading = True
-
     def get_dummy_components(self, num_layers: int = 1, num_single_layers: int = 1):
         torch.manual_seed(0)
         transformer = FluxTransformer2DModel(
