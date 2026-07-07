@@ -17,7 +17,6 @@ One test per contract that would ship broken if regressed. Grouped by command.
 """
 
 import subprocess
-from types import SimpleNamespace
 
 import pytest
 
@@ -111,12 +110,3 @@ class TestCli:
         assert result.returncode == 0
         for cmd in AVAILABLE_COMMANDS:
             assert cmd in result.stdout
-
-
-def _fake_bucket_api():
-    calls = SimpleNamespace(create_bucket=[], batch_bucket_files=[])
-    api = SimpleNamespace(
-        create_bucket=lambda bucket_id, exist_ok=False: calls.create_bucket.append((bucket_id, exist_ok)),
-        batch_bucket_files=lambda bucket_id, add=None: calls.batch_bucket_files.append((bucket_id, add)),
-    )
-    return api, calls
