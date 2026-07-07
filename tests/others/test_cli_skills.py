@@ -136,7 +136,7 @@ class TestInstallCursor:
         _install_cursor("x", bundle, tmp_path, force=False)
         content = (tmp_path / ".cursor" / "rules" / "x.mdc").read_text()
         # Quotes and backslashes escaped inside the YAML string
-        assert r'\"hello\"' in content
+        assert r"\"hello\"" in content
         assert r"\\backslash" in content
 
     def test_errors_without_skill_md(self, tmp_path):

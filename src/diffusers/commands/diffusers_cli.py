@@ -16,6 +16,7 @@
 from argparse import ArgumentParser
 
 from huggingface_hub.cli._output import OutputFormat, out
+
 from .custom_blocks import CustomBlocksCommand
 from .env import EnvironmentCommand
 from .fp16_safetensors import FP16SafetensorsCommand

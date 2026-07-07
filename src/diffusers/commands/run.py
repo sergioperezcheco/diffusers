@@ -27,11 +27,15 @@ from argparse import ArgumentParser, Namespace, _SubParsersAction
 from pathlib import Path
 from typing import Any
 
-from diffusers.utils import load_image
-
 from huggingface_hub.cli._output import out
 
+from diffusers.models.attention_dispatch import _HUB_KERNELS_REGISTRY
+from diffusers.utils import load_image, load_video, logging
+
 from . import BaseDiffusersCLICommand
+
+
+logger = logging.get_logger("diffusers-cli/run")
 
 
 # ---------------------------------------------------------------------------
@@ -43,20 +47,11 @@ DTYPE_CHOICES = ("auto", "float16", "fp16", "bfloat16", "bf16", "float32", "fp32
 CPU_OFFLOAD_CHOICES = ("model", "group")
 
 
-def _hub_attention_backends() -> tuple[str, ...]:
-    """Hub-hosted attention backends sourced from ``_HUB_KERNELS_REGISTRY``.
+ATTENTION_BACKEND_CHOICES = ("default", *sorted(b.value for b in _HUB_KERNELS_REGISTRY))
 
-    Single source of truth: if the registry grows or shrinks, the CLI choices follow.
-    """
-    from diffusers.models.attention_dispatch import _HUB_KERNELS_REGISTRY
-
-    return tuple(sorted(backend.value for backend in _HUB_KERNELS_REGISTRY))
-
-
-ATTENTION_BACKEND_CHOICES = ("default", *_hub_attention_backends())
-
-# Keys whose string value should be resolved via ``diffusers.utils.load_image``
-# before being passed to the pipeline call.
+# Kwarg keys whose string value gets auto-loaded before being passed to the pipeline call.
+# Images resolve via ``diffusers.utils.load_image`` → PIL.Image.Image; videos resolve via
+# ``diffusers.utils.load_video`` → list[PIL.Image.Image].
 _IMAGE_INPUT_KEYS = (
     "image",
     "mask_image",
@@ -64,17 +59,17 @@ _IMAGE_INPUT_KEYS = (
     "ip_adapter_image",
     "image_2",
 )
-
-# Source for the diffusers install used by --remote jobs. While iterating on a
-# feature branch, point at the GitHub tarball URL — uv installs it over plain
-# HTTP and the container doesn't need ``git``. Once merged, switch back to a
-# PyPI release pin. ``--dependencies "diffusers @ ..."`` on the local command
-# appends additional dependencies but does not replace this default install.
-DIFFUSERS_SOURCE = (
-    "diffusers @ https://github.com/huggingface/diffusers/archive/refs/heads/diffuser-cli-for-agent.tar.gz"
+_VIDEO_INPUT_KEYS = (
+    "video",
+    "control_video",
 )
+
+# Pipeline attribute prefixes that identify a denoiser submodule. Matches base names
+# (``transformer``, ``unet``) and their numbered variants (``transformer_2``, etc.).
+_DENOISER_COMPONENT_KEYS = ("transformer", "unet")
+
 _DEFAULT_REMOTE_DEPS = (
-    DIFFUSERS_SOURCE,
+    "diffusers",
     "accelerate",
     "transformers",
     "safetensors",
@@ -89,6 +84,10 @@ _DEFAULT_REMOTE_IMAGE = "pytorch/pytorch:2.10.0-cuda12.8-cudnn9-runtime"
 
 # Installed console-script name invoked inside the container after the deps land.
 _CONTAINER_CLI_BINARY = "diffusers-cli"
+
+# Mount path inside the container for the bucket volume that carries local media
+# uploaded from ``--pipeline-kwargs`` for ``--remote`` runs.
+_INPUTS_MOUNT_ROOT = "/mnt/inputs"
 
 RUN_ID_ENV = "DIFFUSERS_CLI_RUN_ID"
 
@@ -283,8 +282,10 @@ def _map_to_device(pipeline: Any, args: Namespace, device: str) -> Any:
     """Move the pipeline to ``device``, or hand off to the chosen CPU-offload helper."""
     if args.cpu_offload is None:
         return pipeline.to(device)
+
     if args.cpu_offload == "model":
         pipeline.enable_model_cpu_offload(device=device)
+
     elif args.cpu_offload == "group":
         import torch
 
@@ -293,24 +294,20 @@ def _map_to_device(pipeline: Any, args: Namespace, device: str) -> Any:
             offload_type="leaf_level",
             use_stream=True,
         )
+
     return pipeline
 
 
-def _denoiser(pipeline: Any) -> Any | None:
-    """Return the pipeline's denoiser submodule (transformer or unet) or None."""
-    for attr in ("transformer", "unet"):
-        module = getattr(pipeline, attr, None)
-        if module is not None:
-            return module
-    return None
-
-
 def _set_attention_backend(pipeline: Any, backend: str) -> None:
-    module = _denoiser(pipeline)
-    if module is None or not hasattr(module, "set_attention_backend"):
+    transformer = getattr(pipeline, "transformer", None)
+    if transformer is None or not hasattr(transformer, "set_attention_backend"):
+        logger.warning(
+            f"--attention-backend is only supported on transformer-based pipelines; "
+            f"{type(pipeline).__name__} uses the legacy UNet attention path."
+        )
         return
     try:
-        module.set_attention_backend(backend)
+        transformer.set_attention_backend(backend)
     except (ValueError, ImportError, RuntimeError) as e:
         raise SystemExit(
             f"Failed to set attention backend {backend!r}: {type(e).__name__}: {e}. "
@@ -382,7 +379,7 @@ def _compile_denoiser(pipeline: Any, compile_spec: str) -> None:
         raise SystemExit("--compile must decode to a JSON object.")
 
     for attr in dir(pipeline):
-        if not (attr.startswith("transformer") or attr.startswith("unet")):
+        if not any(attr.startswith(key) for key in _DENOISER_COMPONENT_KEYS):
             continue
         module = getattr(pipeline, attr, None)
         if not isinstance(module, torch.nn.Module):
@@ -394,33 +391,6 @@ def _compile_denoiser(pipeline: Any, compile_spec: str) -> None:
         else:
             # No regional metadata declared; fall back to compiling the whole module.
             setattr(pipeline, attr, torch.compile(module, **compile_kwargs))
-
-
-def _from_pretrained_kwargs(args: Namespace) -> dict[str, Any]:
-    dtype = _resolve_dtype(args.dtype)
-    kwargs: dict[str, Any] = {"trust_remote_code": args.trust_remote_code, "disable_mmap": True}
-    if dtype != "auto":
-        kwargs["torch_dtype"] = dtype
-    if args.variant:
-        kwargs["variant"] = args.variant
-    if args.revision:
-        kwargs["revision"] = args.revision
-    if args.token:
-        kwargs["token"] = args.token
-    return kwargs
-
-
-def _load_pipeline(args: Namespace, modular: bool) -> Any:
-    import diffusers
-
-    pipeline_cls = diffusers.ModularPipeline if modular else diffusers.DiffusionPipeline
-    pipeline = pipeline_cls.from_pretrained(args.model, **_from_pretrained_kwargs(args))
-    if not hasattr(pipeline, "to"):
-        return pipeline
-    pipeline = _map_to_device(pipeline, args, _resolve_device(args.device))
-    _apply_optimizations(pipeline, args)
-    _load_lora(pipeline, args)
-    return pipeline
 
 
 def _load_lora(pipeline: Any, args: Namespace) -> None:
@@ -445,20 +415,46 @@ def _load_lora(pipeline: Any, args: Namespace) -> None:
         pipeline.set_adapters(["default"], adapter_weights=[float(scale)])
 
 
+def _load_pipeline(args: Namespace, modular: bool) -> Any:
+    import diffusers
+
+    dtype = _resolve_dtype(args.dtype)
+    common_kwargs: dict[str, Any] = {
+        "trust_remote_code": args.trust_remote_code,
+        "disable_mmap": True,
+    }
+    if dtype != "auto":
+        common_kwargs["torch_dtype"] = dtype
+    if args.variant:
+        common_kwargs["variant"] = args.variant
+    if args.token:
+        common_kwargs["token"] = args.token
+
+    if modular:
+        # ModularPipeline.from_pretrained fetches only the pipeline config; component
+        # weights come in via load_components(). `revision` scopes the config fetch,
+        # so it stays on from_pretrained — each ComponentSpec pins its own revision,
+        # and forwarding a global `revision` to load_components() would override those.
+        pipeline = diffusers.ModularPipeline.from_pretrained(
+            args.model,
+            trust_remote_code=args.trust_remote_code,
+            token=args.token,
+            revision=args.revision,
+        )
+        pipeline.load_components(**common_kwargs)
+    else:
+        pipeline = diffusers.DiffusionPipeline.from_pretrained(args.model, revision=args.revision, **common_kwargs)
+
+    _load_lora(pipeline, args)
+    pipeline = _map_to_device(pipeline, args, _resolve_device(args.device))
+    _apply_optimizations(pipeline, args)
+
+    return pipeline
+
+
 # ---------------------------------------------------------------------------
 # Modular pipeline detection + introspection
 # ---------------------------------------------------------------------------
-
-
-def _is_modular_repo(args: Namespace) -> bool:
-    """Detect by trying ``DiffusionPipeline.load_config`` first; modular iff that raises."""
-    from diffusers import DiffusionPipeline
-
-    try:
-        DiffusionPipeline.load_config(args.model, token=args.token, revision=args.revision)
-        return False
-    except OSError:
-        return True
 
 
 # ---------------------------------------------------------------------------
@@ -478,12 +474,20 @@ def _parse_pipeline_kwargs(raw: str | None) -> dict[str, Any]:
     return parsed
 
 
-def _resolve_image_inputs(call_kwargs: dict[str, Any]) -> None:
-    """Replace string paths/URLs at known image-input keys with PIL images."""
+def _resolve_media_inputs(call_kwargs: dict[str, Any]) -> None:
+    """Replace string paths/URLs at known image/video-input keys with loaded media.
+
+    Images resolve to a ``PIL.Image.Image`` via ``load_image``; videos resolve to a ``list[PIL.Image.Image]`` via
+    ``load_video``. Values that aren't strings pass through untouched.
+    """
     for key in _IMAGE_INPUT_KEYS:
         value = call_kwargs.get(key)
         if isinstance(value, str):
             call_kwargs[key] = load_image(value)
+    for key in _VIDEO_INPUT_KEYS:
+        value = call_kwargs.get(key)
+        if isinstance(value, str):
+            call_kwargs[key] = load_video(value)
 
 
 def _get_generator(seed: int | None, device: str):
@@ -495,13 +499,12 @@ def _get_generator(seed: int | None, device: str):
     return torch.Generator(device=generator_device).manual_seed(seed)
 
 
-def _result_to_savable(result: Any) -> Any:
+def _unwrap_pipeline_output(result: Any) -> Any:
     """Unwrap a pipeline-output object into the raw payload the saver can sniff."""
     if hasattr(result, "images"):
         return result.images
     if hasattr(result, "frames"):
-        frames = result.frames
-        return frames[0] if isinstance(frames, (list, tuple)) and frames else frames
+        return result.frames[0]
     if hasattr(result, "audios"):
         return result.audios
     return result
@@ -687,6 +690,65 @@ def _kwargs_to_argv(task: str, task_kwargs: dict[str, Any]) -> list[str]:
     return argv
 
 
+def _send_remote_telemetry() -> None:
+    """Attribute this ``--remote`` submission to the diffusers CLI.
+
+    Respects ``HF_HUB_DISABLE_TELEMETRY`` / ``HF_HUB_OFFLINE``. Network failures are swallowed inside the hub's own
+    daemon-thread worker.
+    """
+    from huggingface_hub.utils import send_telemetry
+
+    import diffusers
+
+    send_telemetry(
+        topic="diffusers/cli/run/remote",
+        library_name="diffusers",
+        library_version=diffusers.__version__,
+    )
+
+
+def _maybe_upload_local_media(args: Namespace, api: Any, run_id: str) -> bool:
+    """Upload any local media paths in ``--pipeline-kwargs`` to the artifacts bucket.
+
+    Walks known image/video-input keys; any string value that resolves to a local file is uploaded to
+    ``<bucket>/<run_id>/inputs/<key>_<basename>`` and the JSON is rewritten so the container sees the mounted-volume
+    path instead. Returns True iff any files were uploaded (caller then mounts the bucket at ``_INPUTS_MOUNT_ROOT``).
+
+    URLs, ``hf://`` URIs, and non-existent paths pass through untouched.
+    """
+    if not args.pipeline_kwargs:
+        return False
+    try:
+        parsed = json.loads(args.pipeline_kwargs)
+    except json.JSONDecodeError:
+        return False  # container will fail loudly with a parse error later
+    if not isinstance(parsed, dict):
+        return False
+
+    uploads: list[tuple[str, str]] = []
+    for key in (*_IMAGE_INPUT_KEYS, *_VIDEO_INPUT_KEYS):
+        value = parsed.get(key)
+        if not isinstance(value, str) or not Path(value).is_file():
+            continue
+        local = Path(value)
+        remote_path = f"{run_id}/inputs/{key}_{local.name}"
+        uploads.append((str(local), remote_path))
+        parsed[key] = f"{_INPUTS_MOUNT_ROOT}/{remote_path}"
+
+    if not uploads:
+        return False
+
+    print(
+        f"[diffusers-cli] uploading {len(uploads)} local input file(s) to bucket {args.push_to!r}...",
+        file=sys.stderr,
+        flush=True,
+    )
+    api.create_bucket(args.push_to, exist_ok=True)
+    api.batch_bucket_files(args.push_to, add=uploads)
+    args.pipeline_kwargs = json.dumps(parsed)
+    return True
+
+
 def _maybe_submit_remote(args: Namespace, task: str) -> bool:
     """If ``--remote`` was set, submit this invocation to HF Jobs and return True."""
     if not args.remote:
@@ -711,6 +773,8 @@ def _maybe_submit_remote(args: Namespace, task: str) -> bool:
 
     run_id = uuid.uuid4().hex[:12]
 
+    inputs_mounted = _maybe_upload_local_media(args, api, run_id)
+
     task_kwargs = _build_task_kwargs(args)
     dependencies = list(_DEFAULT_REMOTE_DEPS)
     if args.dependencies:
@@ -723,19 +787,14 @@ def _maybe_submit_remote(args: Namespace, task: str) -> bool:
     }
 
     if Path(args.model).exists():
-        print(
-            f"[diffusers-cli] WARNING: --model {args.model!r} is a local path; the container can't see it. "
-            "Pass a Hub repo id so the job can download it.",
-            file=sys.stderr,
-            flush=True,
+        raise SystemExit(
+            f"--model {args.model!r} is a local path; the container can't see it. "
+            "Pass a Hub repo id so the job can download it."
         )
 
-    # Build the in-container shell command: install the small Python deps into the
-    # image's system Python (where torch + CUDA already live) via ``uv pip install
-    # --system``, then exec the CLI with the same argv. --break-system-packages
-    # bypasses PEP 668; safe here because the container is ephemeral.
-    # For --context-parallel, wrap with torchrun so torch.distributed initializes
-    # across every visible GPU before our run command kicks off.
+    # --break-system-packages bypasses PEP 668; safe because the container is ephemeral.
+    # torchrun wraps the CLI for --context-parallel so torch.distributed initializes
+    # across every visible GPU before the run command starts.
     install_cmd = shlex.join(["uv", "pip", "install", "--system", "--break-system-packages", *dependencies])
     cli_argv = _kwargs_to_argv(task, task_kwargs)
     if args.context_parallel:
@@ -745,9 +804,16 @@ def _maybe_submit_remote(args: Namespace, task: str) -> bool:
     cli_cmd = shlex.join(cli_argv)
     container_cmd = ["sh", "-c", f"{install_cmd} && {cli_cmd}"]
 
+    volumes = None
+    if inputs_mounted:
+        from huggingface_hub import Volume
+
+        volumes = [Volume(type="bucket", source=args.push_to, mount_path=_INPUTS_MOUNT_ROOT)]
+
     job = run_job(
         image=_DEFAULT_REMOTE_IMAGE,
         command=container_cmd,
+        volumes=volumes,
         flavor=args.flavor,
         timeout=args.timeout,
         namespace=args.namespace,
@@ -755,11 +821,13 @@ def _maybe_submit_remote(args: Namespace, task: str) -> bool:
         env=env,
         token=hf_token,
     )
+    _send_remote_telemetry()
 
     payload: dict[str, Any] = {
         "task": "remote-submit",
         "job_id": getattr(job, "id", None),
         "job_status": str(getattr(job, "status", "")),
+        "job_url": getattr(job, "url", "https://huggingface.co/jobs"),
         "flavor": args.flavor,
         "push_to": args.push_to,
         "run_id": run_id,
@@ -769,12 +837,6 @@ def _maybe_submit_remote(args: Namespace, task: str) -> bool:
         out.result(payload["task"], **payload)
         return True
 
-    print(
-        f"[diffusers-cli] submitted job {job.id} (run_id={run_id}); "
-        f"watch at {getattr(job, 'url', 'https://huggingface.co/jobs')}",
-        file=sys.stderr,
-        flush=True,
-    )
     final_status = _wait_for_job(api, job.id, args.namespace, args.poll_interval)
     payload["job_status"] = final_status
     payload["timing"] = _job_timing(api, job.id, args.namespace)
@@ -913,7 +975,8 @@ class RunCommand(BaseDiffusersCLICommand):
             default=None,
             help=(
                 "JSON object of kwargs passed to the pipeline call. String values at known "
-                f"image-input keys ({', '.join(_IMAGE_INPUT_KEYS)}) are auto-loaded as PIL images."
+                f"image-input keys ({', '.join(_IMAGE_INPUT_KEYS)}) are auto-loaded as PIL images; "
+                f"video-input keys ({', '.join(_VIDEO_INPUT_KEYS)}) are auto-loaded as frame lists."
             ),
         )
         parser.add_argument(
@@ -942,15 +1005,26 @@ class RunCommand(BaseDiffusersCLICommand):
         self.args = args
 
     def run(self) -> None:
-        is_modular = _is_modular_repo(self.args)
+        import diffusers
+
+        try:
+            diffusers.DiffusionPipeline.load_config(
+                self.args.model, token=self.args.token, revision=self.args.revision
+            )
+            is_modular = False
+        except OSError:
+            is_modular = True
+
+        # Validate --pipeline-kwargs locally before spending a job submission on it. Image inputs
+        # stay unresolved here — they need to be fetched inside the container (or locally if not
+        # --remote) so we don't waste bandwidth downloading and re-uploading them.
+        call_kwargs = _parse_pipeline_kwargs(self.args.pipeline_kwargs)
 
         if _maybe_submit_remote(self.args, self.task):
             return
 
         pipeline = _load_pipeline(self.args, modular=is_modular)
-
-        call_kwargs = _parse_pipeline_kwargs(self.args.pipeline_kwargs)
-        _resolve_image_inputs(call_kwargs)
+        _resolve_media_inputs(call_kwargs)
 
         if self.args.output_key is not None:
             call_kwargs["output"] = self.args.output_key
@@ -967,7 +1041,7 @@ class RunCommand(BaseDiffusersCLICommand):
             # transformer compute but ranks reduce to the same final tensors). Save/push/print
             # from rank 0 only to avoid clobbering bucket files 4x and printing 4x.
             if os.environ.get("RANK", "0") == "0":
-                savable = result if is_modular else _result_to_savable(result)
+                savable = result if is_modular else _unwrap_pipeline_output(result)
                 saved = _save_output(savable, self.args, self.task)
                 pushed = _push_outputs(self.args, saved, self.task)
 

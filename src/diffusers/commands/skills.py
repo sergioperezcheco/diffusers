@@ -13,17 +13,16 @@
 # limitations under the License.
 """``diffusers-cli skills`` — install agent skill bundles into multiple AI coding agents.
 
-Skill bundles live under ``.ai/skills/<name>/`` in the diffusers repo. ``install`` fetches a bundle
-via the GitHub Contents API and writes it in the format expected by each target agent:
+Skill bundles live under ``.ai/skills/<name>/`` in the diffusers repo. ``install`` fetches a bundle via the GitHub
+Contents API and writes it in the format expected by each target agent:
 
-- ``claude``  → ``.claude/skills/<name>/`` (bundle copied verbatim)
-- ``cursor``  → ``.cursor/rules/<name>.mdc`` (frontmatter rewritten for Cursor)
+- ``claude`` → ``.claude/skills/<name>/`` (bundle copied verbatim)
+- ``cursor`` → ``.cursor/rules/<name>.mdc`` (frontmatter rewritten for Cursor)
 - ``agents-md`` → ``AGENTS.md`` section (covers Codex, Aider, etc.)
 
-Default is auto-detect via env vars set by known agents (``CLAUDECODE``, ``CURSOR_AI``,
-``CODEX_SANDBOX``, ``AIDER_AI_CONTEXT``). If no agent is detected, writes to all three so the
-bundle is available no matter which agent the user later switches to. Override with
-``--agents claude,cursor`` etc.
+Default is auto-detect via env vars set by known agents (``CLAUDECODE``, ``CURSOR_AI``, ``CODEX_SANDBOX``,
+``AIDER_AI_CONTEXT``). If no agent is detected, writes to all three so the bundle is available no matter which agent
+the user later switches to. Override with ``--agents claude,cursor`` etc.
 """
 
 from __future__ import annotations
@@ -175,7 +174,7 @@ def _install_cursor(name: str, bundle: dict[str, bytes], root: Path, force: bool
         raise SystemExit(f"Cursor rule already exists at {rule_path}. Use --force to reinstall.")
     rule_path.parent.mkdir(parents=True, exist_ok=True)
     escaped = description.replace("\\", "\\\\").replace('"', '\\"')
-    content = "---\n" f'description: "{escaped}"\n' "globs:\n" "alwaysApply: false\n" "---\n" "\n" f"{body}"
+    content = f'---\ndescription: "{escaped}"\nglobs:\nalwaysApply: false\n---\n\n{body}'
     rule_path.write_text(content)
     return rule_path
 
@@ -220,9 +219,9 @@ _ADAPTERS = {
 def _detect_targets() -> tuple[str, ...]:
     """Pick a default target set.
 
-    If an AI agent env var is set, install only to that agent (the agent presumably set up the
-    invocation and knows what it needs). Otherwise install to every target so the bundle is
-    available in whichever tool the user later switches to.
+    If an AI agent env var is set, install only to that agent (the agent presumably set up the invocation and knows
+    what it needs). Otherwise install to every target so the bundle is available in whichever tool the user later
+    switches to.
     """
     for env_var, target in _AGENT_ENV_TO_TARGET.items():
         if os.environ.get(env_var):
@@ -278,8 +277,7 @@ class SkillsCommand(BaseDiffusersCLICommand):
         root = Path.home() if self.args.install_global else Path.cwd()
 
         locations = {
-            target: str(_ADAPTERS[target](self.args.name, bundle, root, self.args.force))
-            for target in targets
+            target: str(_ADAPTERS[target](self.args.name, bundle, root, self.args.force)) for target in targets
         }
         out.result(f"Installed skill '{self.args.name}' to {len(targets)} target(s)", **locations)
 

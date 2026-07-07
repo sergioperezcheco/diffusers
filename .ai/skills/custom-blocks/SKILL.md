@@ -105,7 +105,7 @@ Output in cwd:
 ```
 ./
 ├── block.py
-├── config.json          # contains auto_map → MyDenoiseBlock
+├── modular_config.json  # contains auto_map → MyDenoiseBlock
 └── (any state files MyDenoiseBlock.save_pretrained writes)
 ```
 
