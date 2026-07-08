@@ -946,7 +946,7 @@ class RunCommand(BaseDiffusersCLICommand):
             "  $ diffusers-cli run -m black-forest-labs/FLUX.1-dev --dtype bf16 \\\n"
             '      --pipeline-kwargs \'{"prompt": "a cat on the moon"}\'\n'
             "  $ diffusers-cli run -m black-forest-labs/FLUX.1-dev --dtype bf16 \\\n"
-            '      --pipeline-kwargs \'{"prompt": "make the fur grey", "image": "https://example.com/cat.png"}\'\n'
+            '      --pipeline-kwargs \'{"prompt": "make the fur grey", "image": "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/cat.png"}\'\n'
             "  $ diffusers-cli run -m black-forest-labs/FLUX.1-dev --dtype bf16 \\\n"
             '      --pipeline-kwargs \'{"prompt": "a tiny cat"}\' \\\n'
             '      --lora \'{"lora_id": "alvdansen/littletinies", "lora_scale": 0.8}\'\n'

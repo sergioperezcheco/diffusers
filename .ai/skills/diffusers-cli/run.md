@@ -40,7 +40,7 @@ or local paths directly:
 ```bash
 diffusers-cli run \
     --model black-forest-labs/FLUX.2-klein-9B \
-    --pipeline-kwargs '{"image": "https://example.com/cat.png", "prompt": "make the fur grey", "strength": 0.6}'
+    --pipeline-kwargs '{"image": "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/cat.png", "prompt": "make the fur grey", "strength": 0.6}'
 ```
 
 **Shell-quoting gotcha**: the JSON must be on one line (or use `\` to line-continue). A literal newline inside the
