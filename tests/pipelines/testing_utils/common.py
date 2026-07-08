@@ -148,9 +148,6 @@ class BasePipelineTesterConfig:
             if "text_encoder" in key and hasattr(components[key], "eval"):
                 components[key].eval()
         pipe = cfg.pipeline_class(**components)
-        for component in pipe.components.values():
-            if hasattr(component, "set_default_attn_processor"):
-                component.set_default_attn_processor()
         pipe.to(torch_device)
         pipe.set_progress_bar_config(disable=None)
 
@@ -174,9 +171,6 @@ class PipelineTesterMixin:
             if "text_encoder" in key and hasattr(components[key], "eval"):
                 components[key].eval()
         pipe = self.pipeline_class(**components)
-        for component in pipe.components.values():
-            if hasattr(component, "set_default_attn_processor"):
-                component.set_default_attn_processor()
         pipe.to(torch_device)
         pipe.set_progress_bar_config(disable=None)
 
@@ -187,10 +181,6 @@ class PipelineTesterMixin:
 
         with CaptureLogger(logger) as cap_logger:
             pipe_loaded = self.pipeline_class.from_pretrained(tmp_path)
-
-        for component in pipe_loaded.components.values():
-            if hasattr(component, "set_default_attn_processor"):
-                component.set_default_attn_processor()
 
         for name in pipe_loaded.components.keys():
             if name not in pipe_loaded._optional_components:
@@ -286,9 +276,6 @@ class PipelineTesterMixin:
             if "text_encoder" in key and hasattr(components[key], "eval"):
                 components[key].eval()
         pipe = self.pipeline_class(**components)
-        for component in pipe.components.values():
-            if hasattr(component, "set_default_attn_processor"):
-                component.set_default_attn_processor()
 
         pipe.to(torch_device)
         pipe.set_progress_bar_config(disable=None)
@@ -339,9 +326,6 @@ class PipelineTesterMixin:
             if "text_encoder" in key and hasattr(components[key], "eval"):
                 components[key].eval()
         pipe = self.pipeline_class(**components)
-        for component in pipe.components.values():
-            if hasattr(component, "set_default_attn_processor"):
-                component.set_default_attn_processor()
 
         pipe.to(torch_device)
         pipe.set_progress_bar_config(disable=None)
@@ -381,18 +365,12 @@ class PipelineTesterMixin:
     def test_float16_inference(self, expected_max_diff=5e-2):
         components = self.get_dummy_components()
         pipe = self.pipeline_class(**components)
-        for component in pipe.components.values():
-            if hasattr(component, "set_default_attn_processor"):
-                component.set_default_attn_processor()
 
         pipe.to(torch_device)
         pipe.set_progress_bar_config(disable=None)
 
         components = self.get_dummy_components()
         pipe_fp16 = self.pipeline_class(**components)
-        for component in pipe_fp16.components.values():
-            if hasattr(component, "set_default_attn_processor"):
-                component.set_default_attn_processor()
         pipe_fp16.to(torch_device, torch.float16)
         pipe_fp16.set_progress_bar_config(disable=None)
 
@@ -447,9 +425,6 @@ class PipelineTesterMixin:
                 component.eval()
 
         pipe = self.pipeline_class(**components)
-        for component in pipe.components.values():
-            if hasattr(component, "set_default_attn_processor"):
-                component.set_default_attn_processor()
         pipe.to(torch_device)
         pipe.set_progress_bar_config(disable=None)
 
@@ -458,9 +433,6 @@ class PipelineTesterMixin:
 
         pipe.save_pretrained(tmp_path)
         pipe_loaded = self.pipeline_class.from_pretrained(tmp_path, torch_dtype=torch.float16)
-        for component in pipe_loaded.components.values():
-            if hasattr(component, "set_default_attn_processor"):
-                component.set_default_attn_processor()
         pipe_loaded.to(torch_device)
         pipe_loaded.set_progress_bar_config(disable=None)
 
@@ -487,9 +459,6 @@ class PipelineTesterMixin:
             if "text_encoder" in key and hasattr(components[key], "eval"):
                 components[key].eval()
         pipe = self.pipeline_class(**components)
-        for component in pipe.components.values():
-            if hasattr(component, "set_default_attn_processor"):
-                component.set_default_attn_processor()
         pipe.to(torch_device)
         pipe.set_progress_bar_config(disable=None)
 
@@ -504,9 +473,6 @@ class PipelineTesterMixin:
 
         pipe.save_pretrained(tmp_path, safe_serialization=False)
         pipe_loaded = self.pipeline_class.from_pretrained(tmp_path)
-        for component in pipe_loaded.components.values():
-            if hasattr(component, "set_default_attn_processor"):
-                component.set_default_attn_processor()
         pipe_loaded.to(torch_device)
         pipe_loaded.set_progress_bar_config(disable=None)
 

@@ -48,9 +48,6 @@ class PipelineOffloadTesterMixin:
             if "text_encoder" in key and hasattr(components[key], "eval"):
                 components[key].eval()
         pipe = self.pipeline_class(**components)
-        for component in pipe.components.values():
-            if hasattr(component, "set_default_attn_processor"):
-                component.set_default_attn_processor()
         pipe.to(torch_device)
         pipe.set_progress_bar_config(disable=None)
 
@@ -107,9 +104,6 @@ class PipelineOffloadTesterMixin:
             if "text_encoder" in key and hasattr(components[key], "eval"):
                 components[key].eval()
         pipe = self.pipeline_class(**components)
-        for component in pipe.components.values():
-            if hasattr(component, "set_default_attn_processor"):
-                component.set_default_attn_processor()
         pipe.to(torch_device)
         pipe.set_progress_bar_config(disable=None)
 
@@ -157,10 +151,6 @@ class PipelineOffloadTesterMixin:
         components = self.get_dummy_components()
         pipe = self.pipeline_class(**components)
 
-        for component in pipe.components.values():
-            if hasattr(component, "set_default_attn_processor"):
-                component.set_default_attn_processor()
-
         pipe.set_progress_bar_config(disable=None)
 
         pipe.enable_model_cpu_offload()
@@ -207,10 +197,6 @@ class PipelineOffloadTesterMixin:
         generator_device = "cpu"
         components = self.get_dummy_components()
         pipe = self.pipeline_class(**components)
-
-        for component in pipe.components.values():
-            if hasattr(component, "set_default_attn_processor"):
-                component.set_default_attn_processor()
 
         pipe.set_progress_bar_config(disable=None)
 
@@ -265,18 +251,12 @@ class PipelineOffloadTesterMixin:
             if "text_encoder" in key and hasattr(components[key], "eval"):
                 components[key].eval()
         pipe = self.pipeline_class(**components)
-        for component in pipe.components.values():
-            if hasattr(component, "set_default_attn_processor"):
-                component.set_default_attn_processor()
         pipe.to(torch_device)
         pipe.set_progress_bar_config(disable=None)
 
         pipe.save_pretrained(tmp_path)
 
         loaded_pipe = self.pipeline_class.from_pretrained(tmp_path, device_map=torch_device)
-        for component in loaded_pipe.components.values():
-            if hasattr(component, "set_default_attn_processor"):
-                component.set_default_attn_processor()
 
         inputs = self.get_dummy_inputs(torch_device)
         torch.manual_seed(0)
@@ -439,9 +419,6 @@ class GroupOffloadTesterMixin:
             if "text_encoder" in key and hasattr(components[key], "eval"):
                 components[key].eval()
         pipe: DiffusionPipeline = self.pipeline_class(**components)
-        for component in pipe.components.values():
-            if hasattr(component, "set_default_attn_processor"):
-                component.set_default_attn_processor()
 
         for name, component in pipe.components.items():
             if hasattr(component, "_supports_group_offloading"):
