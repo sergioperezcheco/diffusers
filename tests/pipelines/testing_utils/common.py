@@ -121,13 +121,16 @@ class BasePipelineTesterConfig:
     # ==================== Fixtures ====================
 
     @pytest.fixture(autouse=True)
-    def cleanup(self):
-        """Skip deprecated pipelines and free VRAM before/after each test (replaces unittest setUp/tearDown)."""
+    def skip_if_deprecated(self):
+        """Skip deprecated pipelines."""
         from diffusers.pipelines.pipeline_utils import DeprecatedPipelineMixin
 
         if issubclass(self.pipeline_class, DeprecatedPipelineMixin):
             pytest.skip(reason=f"Deprecated Pipeline: {self.pipeline_class.__name__}")
 
+    @pytest.fixture(autouse=True)
+    def cleanup(self):
+        """Free VRAM before/after each test (replaces unittest setUp/tearDown)."""
         torch.compiler.reset()
         gc.collect()
         backend_empty_cache(torch_device)
