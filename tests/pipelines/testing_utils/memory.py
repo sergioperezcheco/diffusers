@@ -30,6 +30,7 @@ from ...testing_utils import (
     require_torch_accelerator,
     torch_device,
 )
+from .common import BasePipelineOutputMixin
 
 
 if is_accelerate_available():
@@ -37,7 +38,7 @@ if is_accelerate_available():
 
 
 @is_cpu_offload
-class PipelineOffloadTesterMixin:
+class PipelineOffloadTesterMixin(BasePipelineOutputMixin):
     """CPU/sequential offload and accelerate `device_map` loading for pipelines."""
 
     @require_accelerator
@@ -286,7 +287,7 @@ class LayerwiseCastingTesterMixin:
 
 
 @is_group_offload
-class GroupOffloadTesterMixin:
+class GroupOffloadTesterMixin(BasePipelineOutputMixin):
     """Block/leaf-level group offload, both component-scoped and pipeline-level orchestration."""
 
     @require_torch_accelerator

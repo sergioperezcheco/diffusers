@@ -43,13 +43,8 @@ class BasePipelineTesterConfig:
 
     A concrete pipeline test config must set `pipeline_class` and implement `get_dummy_components()` and
     `get_dummy_inputs(device, seed)`. `params` and `batch_params` should be set from the canonical sets in
-    `tests/pipelines/pipeline_params.py`.
-
-    The class also exposes the shared pytest fixtures used across the tester mixins, most notably
-    `base_pipe_output` which holds the output of a freshly constructed pipeline run on the standard dummy inputs
-    (computed once per test class and reused by comparison tests). Comparison tests construct their own pipeline
-    inline (mirroring the model-level testers) so the only difference from `base_pipe_output` is the behavior
-    under test.
+    `tests/pipelines/pipeline_params.py`. This class only declares the testing contract; the cached reference
+    output lives on `BasePipelineOutputMixin` (mirroring the model-level `BaseModelOutputMixin`).
 
     NOTE: `get_dummy_inputs` should request torch outputs (`output_type="pt"`) so tests operate on torch tensors
     exclusively and compare with `assert_tensors_close` directly (no numpy round-trip). Keep in mind that `"pt"`
@@ -143,24 +138,33 @@ class BasePipelineTesterConfig:
         gc.collect()
         backend_empty_cache(torch_device)
 
+
+class BasePipelineOutputMixin:
+    """Provides the class-scoped `base_pipe_output` fixture shared across tester mixins.
+
+    Kept separate from `BasePipelineTesterConfig` — which only declares the testing contract and performs no
+    computation — so any mixin that needs the cached reference output (`PipelineTesterMixin`, the memory offload
+    mixins, ...) can inherit it without duplicating the build-and-forward. Mirrors the model-level
+    `BaseModelOutputMixin`.
+    """
+
     @pytest.fixture(scope="class")
-    def base_pipe_output(self, request):
+    def base_pipe_output(self):
         """Output of a freshly constructed pipeline on the standard dummy inputs, computed once per test class."""
-        cfg = request.cls()
-        components = cfg.get_dummy_components()
+        components = self.get_dummy_components()
         for key in components:
             if "text_encoder" in key and hasattr(components[key], "eval"):
                 components[key].eval()
-        pipe = cfg.pipeline_class(**components)
+        pipe = self.pipeline_class(**components)
         pipe.to(torch_device)
         pipe.set_progress_bar_config(disable=None)
 
-        inputs = cfg.get_dummy_inputs(torch_device)
+        inputs = self.get_dummy_inputs(torch_device)
         torch.manual_seed(0)
         return pipe(**inputs)[0]
 
 
-class PipelineTesterMixin:
+class PipelineTesterMixin(BasePipelineOutputMixin):
     """
     Common tests for each PyTorch pipeline: saving and loading, equivalence of dict and tuple outputs, batching,
     dtype/device handling, callbacks, and variants.
