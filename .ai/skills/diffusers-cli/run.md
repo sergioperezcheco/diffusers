@@ -15,7 +15,7 @@ diffusers-cli --format json schema --model black-forest-labs/FLUX.2-klein-9B
 # 2. Run it
 diffusers-cli run \
     --model black-forest-labs/FLUX.2-klein-9B \
-    --pipeline-kwargs '{"prompt": "Make the cats fur grey", "image": "https://blobcdn.same.energy/a/d0/58/d058b51c2329b0ea4057e9f12cd9a1da36347e34"}' \
+    --pipeline-kwargs '{"prompt": "Make the cats fur grey", "image": "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/cat.png"}' \
     --dtype bf16
 ```
 
@@ -97,7 +97,7 @@ Adds `--remote` to submit the same call as a Hugging Face Job:
 ```bash
 diffusers-cli run \
     --model black-forest-labs/FLUX.2-klein-9B \
-    --pipeline-kwargs '{"prompt": "Make the cats fur grey", "image": "https://blobcdn.same.energy/a/d0/58/d058b51c2329b0ea4057e9f12cd9a1da36347e34"}' \
+    --pipeline-kwargs '{"prompt": "Make the cats fur grey", "image": "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/cat.png"}' \
     --remote --flavor a100-large \
     --dtype bf16 \
     --cpu-offload group
@@ -142,7 +142,7 @@ a multi-GPU flavor:
 ```bash
 diffusers-cli run \
     --model black-forest-labs/FLUX.2-klein-9B \
-    --pipeline-kwargs '{"prompt": "Make the cats fur grey", "image": "https://blobcdn.same.energy/a/d0/58/d058b51c2329b0ea4057e9f12cd9a1da36347e34"}' \
+    --pipeline-kwargs '{"prompt": "Make the cats fur grey", "image": "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/cat.png"}' \
     --remote --flavor 4xa100-large \
     --dtype bf16 \
     --context-parallel
