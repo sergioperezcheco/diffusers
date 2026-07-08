@@ -32,7 +32,6 @@ from ...testing_utils import (
     CaptureLogger,
     assert_tensors_close,
     backend_empty_cache,
-    numpy_cosine_similarity_distance,
     require_accelerator,
     torch_device,
 )
@@ -365,35 +364,25 @@ class PipelineTesterMixin:
         assert hasattr(pipe, "components")
         assert set(pipe.components.keys()) == set(init_components.keys())
 
-    @pytest.mark.skipif(torch_device not in ["cuda", "xpu"], reason="float16 requires CUDA or XPU")
+    @pytest.mark.skipif(torch_device not in ["cuda", "xpu"], reason="half-precision inference requires CUDA or XPU")
     @require_accelerator
-    def test_float16_inference(self, expected_max_diff=5e-2):
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16], ids=str)
+    def test_half_precision_inference_no_nan(self, dtype):
+        # Models are usually run in half precision (fp16/bf16), so rather than comparing against an fp32 reference
+        # (which carries little signal) we just run half-precision inference and check the output has no NaNs.
         components = self.get_dummy_components()
         pipe = self.pipeline_class(**components)
-
-        pipe.to(torch_device)
+        pipe.to(torch_device, dtype)
         pipe.set_progress_bar_config(disable=None)
-
-        components = self.get_dummy_components()
-        pipe_fp16 = self.pipeline_class(**components)
-        pipe_fp16.to(torch_device, torch.float16)
-        pipe_fp16.set_progress_bar_config(disable=None)
 
         inputs = self.get_dummy_inputs(torch_device)
         if "generator" in inputs:
             inputs["generator"] = self.get_generator(0)
         output = pipe(**inputs)[0]
 
-        fp16_inputs = self.get_dummy_inputs(torch_device)
-        if "generator" in fp16_inputs:
-            fp16_inputs["generator"] = self.get_generator(0)
-        output_fp16 = pipe_fp16(**fp16_inputs)[0]
-
-        output = output.cpu().numpy()
-        output_fp16 = output_fp16.cpu().numpy()
-
-        max_diff = numpy_cosine_similarity_distance(output.flatten(), output_fp16.flatten())
-        assert max_diff < expected_max_diff
+        assert not torch.isnan(output).any(), (
+            f"`{self.pipeline_class.__name__}` produced NaNs during {dtype} inference."
+        )
 
     @pytest.mark.skipif(torch_device not in ["cuda", "xpu"], reason="float16 requires CUDA or XPU")
     @require_accelerator
