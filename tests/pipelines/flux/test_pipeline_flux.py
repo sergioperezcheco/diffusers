@@ -38,8 +38,10 @@ from ..testing_utils import (
 
 class FluxPipelineTesterConfig(BasePipelineTesterConfig):
     pipeline_class = FluxPipeline
-    params = frozenset(["prompt", "height", "width", "guidance_scale", "prompt_embeds", "pooled_prompt_embeds"])
-    batch_params = frozenset(["prompt"])
+    required_input_params_in_call_signature = frozenset(
+        ["prompt", "height", "width", "guidance_scale", "prompt_embeds", "pooled_prompt_embeds"]
+    )
+    batch_input_params = frozenset(["prompt"])
 
     def get_dummy_components(self, num_layers: int = 1, num_single_layers: int = 1):
         torch.manual_seed(0)

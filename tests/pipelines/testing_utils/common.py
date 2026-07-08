@@ -42,7 +42,7 @@ class BasePipelineTesterConfig:
     Base class defining the configuration interface for pipeline testing.
 
     A concrete pipeline test config must set `pipeline_class` and implement `get_dummy_components()` and
-    `get_dummy_inputs(device, seed)`. `params` and `batch_params` should be set from the canonical sets in
+    `get_dummy_inputs(device, seed)`. `required_input_params_in_call_signature` and `batch_input_params` should be set from the canonical sets in
     `tests/pipelines/pipeline_params.py`. This class only declares the testing contract; the cached reference
     output lives on `BasePipelineOutputMixin` (mirroring the model-level `BaseModelOutputMixin`).
 
@@ -54,7 +54,7 @@ class BasePipelineTesterConfig:
 
     # Canonical parameters that are passed to `__call__` regardless of the type of pipeline. They are always
     # optional and have common sense default values.
-    required_optional_params = frozenset(
+    optional_input_params = frozenset(
         [
             "num_inference_steps",
             "num_images_per_prompt",
@@ -88,18 +88,18 @@ class BasePipelineTesterConfig:
         )
 
     @property
-    def params(self) -> frozenset:
+    def required_input_params_in_call_signature(self) -> frozenset:
         raise NotImplementedError(
-            "You need to set the attribute `params` in the child test class. "
-            "`params` are checked for if all values are present in `__call__`'s signature. "
-            "You can set `params` using one of the common set of parameters defined in `pipeline_params.py`."
+            "You need to set the attribute `required_input_params_in_call_signature` in the child test class. "
+            "`required_input_params_in_call_signature` are checked for if all values are present in `__call__`'s signature. "
+            "You can set `required_input_params_in_call_signature` using one of the common set of parameters defined in `pipeline_params.py`."
         )
 
     @property
-    def batch_params(self) -> frozenset:
+    def batch_input_params(self) -> frozenset:
         raise NotImplementedError(
-            "You need to set the attribute `batch_params` in the child test class. "
-            "`batch_params` are the parameters required to be batched when passed to the pipeline's `__call__` "
+            "You need to set the attribute `batch_input_params` in the child test class. "
+            "`batch_input_params` are the parameters required to be batched when passed to the pipeline's `__call__` "
             "method. `pipeline_params.py` provides some common sets such as `TEXT_TO_IMAGE_BATCH_PARAMS`."
         )
 
@@ -219,13 +219,15 @@ class PipelineTesterMixin(BasePipelineOutputMixin):
         parameters.remove("self")
         parameters.discard("kwargs")  # kwargs can be added if arguments of pipeline call function are deprecated
 
-        remaining_required_parameters = {param for param in self.params if param not in parameters}
+        remaining_required_parameters = {
+            param for param in self.required_input_params_in_call_signature if param not in parameters
+        }
         assert len(remaining_required_parameters) == 0, (
             f"Required parameters not present: {remaining_required_parameters}"
         )
 
         remaining_required_optional_parameters = {
-            param for param in self.required_optional_params if param not in optional_parameters
+            param for param in self.optional_input_params if param not in optional_parameters
         }
         assert len(remaining_required_optional_parameters) == 0, (
             f"Required optional parameters not present: {remaining_required_optional_parameters}"
@@ -249,7 +251,7 @@ class PipelineTesterMixin(BasePipelineOutputMixin):
             batched_input = {}
             batched_input.update(inputs)
 
-            for name in self.batch_params:
+            for name in self.batch_input_params:
                 if name not in inputs:
                     continue
 
@@ -298,7 +300,7 @@ class PipelineTesterMixin(BasePipelineOutputMixin):
         batched_inputs = {}
         batched_inputs.update(inputs)
 
-        for name in self.batch_params:
+        for name in self.batch_input_params:
             if name not in inputs:
                 continue
 
@@ -544,7 +546,7 @@ class PipelineTesterMixin(BasePipelineOutputMixin):
                 inputs = self.get_dummy_inputs(torch_device)
 
                 for key in inputs.keys():
-                    if key in self.batch_params:
+                    if key in self.batch_input_params:
                         inputs[key] = batch_size * [inputs[key]]
 
                 images = pipe(**inputs, num_images_per_prompt=num_images_per_prompt)[0]
