@@ -55,7 +55,7 @@ class PipelineOffloadTesterMixin(BasePipelineOutputMixin):
         pipe.enable_sequential_cpu_offload(device=torch_device)
         assert pipe._execution_device.type == torch_device
 
-        inputs = self.get_dummy_inputs(torch_device)
+        inputs = self.get_dummy_inputs()
         torch.manual_seed(0)
         output_with_offload = pipe(**inputs)[0]
 
@@ -111,7 +111,7 @@ class PipelineOffloadTesterMixin(BasePipelineOutputMixin):
         pipe.enable_model_cpu_offload(device=torch_device)
         assert pipe._execution_device.type == torch_device
 
-        inputs = self.get_dummy_inputs(torch_device)
+        inputs = self.get_dummy_inputs()
         torch.manual_seed(0)
         output_with_offload = pipe(**inputs)[0]
 
@@ -148,18 +148,17 @@ class PipelineOffloadTesterMixin(BasePipelineOutputMixin):
     @require_accelerator
     @require_accelerate_version_greater("0.17.0")
     def test_cpu_offload_forward_pass_twice(self, expected_max_diff=2e-4):
-        generator_device = "cpu"
         components = self.get_dummy_components()
         pipe = self.pipeline_class(**components)
 
         pipe.set_progress_bar_config(disable=None)
 
         pipe.enable_model_cpu_offload()
-        inputs = self.get_dummy_inputs(generator_device)
+        inputs = self.get_dummy_inputs()
         output_with_offload = pipe(**inputs)[0]
 
         pipe.enable_model_cpu_offload()
-        inputs = self.get_dummy_inputs(generator_device)
+        inputs = self.get_dummy_inputs()
         output_with_offload_twice = pipe(**inputs)[0]
 
         assert_tensors_close(
@@ -195,18 +194,17 @@ class PipelineOffloadTesterMixin(BasePipelineOutputMixin):
     @require_accelerator
     @require_accelerate_version_greater("0.14.0")
     def test_sequential_offload_forward_pass_twice(self, expected_max_diff=2e-4):
-        generator_device = "cpu"
         components = self.get_dummy_components()
         pipe = self.pipeline_class(**components)
 
         pipe.set_progress_bar_config(disable=None)
 
         pipe.enable_sequential_cpu_offload(device=torch_device)
-        inputs = self.get_dummy_inputs(generator_device)
+        inputs = self.get_dummy_inputs()
         output_with_offload = pipe(**inputs)[0]
 
         pipe.enable_sequential_cpu_offload(device=torch_device)
-        inputs = self.get_dummy_inputs(generator_device)
+        inputs = self.get_dummy_inputs()
         output_with_offload_twice = pipe(**inputs)[0]
 
         assert_tensors_close(
@@ -259,7 +257,7 @@ class PipelineOffloadTesterMixin(BasePipelineOutputMixin):
 
         loaded_pipe = self.pipeline_class.from_pretrained(tmp_path, device_map=torch_device)
 
-        inputs = self.get_dummy_inputs(torch_device)
+        inputs = self.get_dummy_inputs()
         torch.manual_seed(0)
         loaded_out = loaded_pipe(**inputs)[0]
         assert_tensors_close(
@@ -282,7 +280,7 @@ class LayerwiseCastingTesterMixin:
 
         denoiser.enable_layerwise_casting(storage_dtype=torch.float8_e4m3fn, compute_dtype=torch.bfloat16)
 
-        inputs = self.get_dummy_inputs(torch_device)
+        inputs = self.get_dummy_inputs()
         _ = pipe(**inputs)[0]
 
 
@@ -343,7 +341,7 @@ class GroupOffloadTesterMixin(BasePipelineOutputMixin):
 
         def run_forward(pipe):
             torch.manual_seed(0)
-            inputs = self.get_dummy_inputs(torch_device)
+            inputs = self.get_dummy_inputs()
             return pipe(**inputs)[0]
 
         pipe = create_pipe().to(torch_device)
@@ -428,7 +426,7 @@ class GroupOffloadTesterMixin(BasePipelineOutputMixin):
             offload_type="leaf_level",
         )
         pipe.set_progress_bar_config(disable=None)
-        inputs = self.get_dummy_inputs(torch_device)
+        inputs = self.get_dummy_inputs()
         torch.manual_seed(0)
         out_offload = pipe(**inputs)[0]
 

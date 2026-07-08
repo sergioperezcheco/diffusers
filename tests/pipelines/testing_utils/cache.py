@@ -49,7 +49,7 @@ class CacheTesterMixin:
 
         def run_forward(pipe):
             torch.manual_seed(0)
-            inputs = self.get_dummy_inputs(device)
+            inputs = self.get_dummy_inputs()
             inputs["num_inference_steps"] = num_inference_steps
             return pipe(**inputs)[0]
 
@@ -96,8 +96,6 @@ class PyramidAttentionBroadcastTesterMixin(CacheTesterMixin):
     )
 
     def test_pyramid_attention_broadcast_layers(self):
-        device = "cpu"  # ensure determinism for the device-dependent torch.Generator
-
         num_layers = 0
         num_single_layers = 0
         dummy_component_kwargs = {}
@@ -150,7 +148,7 @@ class PyramidAttentionBroadcastTesterMixin(CacheTesterMixin):
                     assert hook.state.iteration == i + 1, "Hook iteration state should have updated during inference."
             return {}
 
-        inputs = self.get_dummy_inputs(device)
+        inputs = self.get_dummy_inputs()
         inputs["num_inference_steps"] = 2
         inputs["callback_on_step_end"] = pab_state_check_callback
         pipe(**inputs)[0]
@@ -178,7 +176,7 @@ class PyramidAttentionBroadcastTesterMixin(CacheTesterMixin):
         pipe.set_progress_bar_config(disable=None)
 
         # Run inference without PAB
-        inputs = self.get_dummy_inputs(device)
+        inputs = self.get_dummy_inputs()
         inputs["num_inference_steps"] = 4
         output = pipe(**inputs)[0]
         original_image_slice = output.flatten()
@@ -189,7 +187,7 @@ class PyramidAttentionBroadcastTesterMixin(CacheTesterMixin):
         denoiser = pipe.transformer if hasattr(pipe, "transformer") else pipe.unet
         denoiser.enable_cache(self.pab_config)
 
-        inputs = self.get_dummy_inputs(device)
+        inputs = self.get_dummy_inputs()
         inputs["num_inference_steps"] = 4
         output = pipe(**inputs)[0]
         image_slice_pab_enabled = output.flatten()
@@ -198,7 +196,7 @@ class PyramidAttentionBroadcastTesterMixin(CacheTesterMixin):
         # Run inference with PAB disabled
         denoiser.disable_cache()
 
-        inputs = self.get_dummy_inputs(device)
+        inputs = self.get_dummy_inputs()
         inputs["num_inference_steps"] = 4
         output = pipe(**inputs)[0]
         image_slice_pab_disabled = output.flatten()
@@ -256,7 +254,6 @@ class FasterCacheTesterMixin(CacheTesterMixin):
     def test_faster_cache_state(self):
         from diffusers.hooks.faster_cache import _FASTER_CACHE_BLOCK_HOOK, _FASTER_CACHE_DENOISER_HOOK
 
-        device = "cpu"  # ensure determinism for the device-dependent torch.Generator
         num_layers = 0
         num_single_layers = 0
         dummy_component_kwargs = {}
@@ -318,7 +315,7 @@ class FasterCacheTesterMixin(CacheTesterMixin):
                 assert state.iteration == i + 1, "Hook iteration state should have updated during inference."
             return {}
 
-        inputs = self.get_dummy_inputs(device)
+        inputs = self.get_dummy_inputs()
         inputs["num_inference_steps"] = 4
         inputs["callback_on_step_end"] = faster_cache_state_check_callback
         _ = pipe(**inputs)[0]

@@ -77,7 +77,7 @@ class FluxIPAdapterTesterMixin:
         )
 
         # forward pass without ip adapter
-        inputs = self._modify_inputs_for_ip_adapter_test(self.get_dummy_inputs(torch_device))
+        inputs = self._modify_inputs_for_ip_adapter_test(self.get_dummy_inputs())
         if expected_pipe_slice is None:
             output_without_adapter = pipe(**inputs)[0]
         else:
@@ -88,7 +88,7 @@ class FluxIPAdapterTesterMixin:
         pipe.transformer._load_ip_adapter_weights(adapter_state_dict)
 
         # forward pass with single ip adapter, but scale=0 which should have no effect
-        inputs = self._modify_inputs_for_ip_adapter_test(self.get_dummy_inputs(torch_device))
+        inputs = self._modify_inputs_for_ip_adapter_test(self.get_dummy_inputs())
         inputs["ip_adapter_image_embeds"] = [self._get_dummy_image_embeds(image_embed_dim)]
         inputs["negative_ip_adapter_image_embeds"] = [self._get_dummy_image_embeds(image_embed_dim)]
         pipe.set_ip_adapter_scale(0.0)
@@ -97,7 +97,7 @@ class FluxIPAdapterTesterMixin:
             output_without_adapter_scale = output_without_adapter_scale[0, -3:, -3:, -1].flatten()
 
         # forward pass with single ip adapter, but with scale of adapter weights
-        inputs = self._modify_inputs_for_ip_adapter_test(self.get_dummy_inputs(torch_device))
+        inputs = self._modify_inputs_for_ip_adapter_test(self.get_dummy_inputs())
         inputs["ip_adapter_image_embeds"] = [self._get_dummy_image_embeds(image_embed_dim)]
         inputs["negative_ip_adapter_image_embeds"] = [self._get_dummy_image_embeds(image_embed_dim)]
         pipe.set_ip_adapter_scale(42.0)
@@ -120,7 +120,7 @@ class FluxIPAdapterTesterMixin:
         pipe.transformer._load_ip_adapter_weights([adapter_state_dict_1, adapter_state_dict_2])
 
         # forward pass with multi ip adapter, but scale=0 which should have no effect
-        inputs = self._modify_inputs_for_ip_adapter_test(self.get_dummy_inputs(torch_device))
+        inputs = self._modify_inputs_for_ip_adapter_test(self.get_dummy_inputs())
         inputs["ip_adapter_image_embeds"] = [self._get_dummy_image_embeds(image_embed_dim)] * 2
         inputs["negative_ip_adapter_image_embeds"] = [self._get_dummy_image_embeds(image_embed_dim)] * 2
         pipe.set_ip_adapter_scale([0.0, 0.0])
@@ -129,7 +129,7 @@ class FluxIPAdapterTesterMixin:
             output_without_multi_adapter_scale = output_without_multi_adapter_scale[0, -3:, -3:, -1].flatten()
 
         # forward pass with multi ip adapter, but with scale of adapter weights
-        inputs = self._modify_inputs_for_ip_adapter_test(self.get_dummy_inputs(torch_device))
+        inputs = self._modify_inputs_for_ip_adapter_test(self.get_dummy_inputs())
         inputs["ip_adapter_image_embeds"] = [self._get_dummy_image_embeds(image_embed_dim)] * 2
         inputs["negative_ip_adapter_image_embeds"] = [self._get_dummy_image_embeds(image_embed_dim)] * 2
         pipe.set_ip_adapter_scale([42.0, 42.0])

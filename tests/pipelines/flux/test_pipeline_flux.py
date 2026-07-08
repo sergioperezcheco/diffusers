@@ -109,15 +109,10 @@ class FluxPipelineTesterConfig(BasePipelineTesterConfig):
             "feature_extractor": None,
         }
 
-    def get_dummy_inputs(self, device, seed=0):
-        if str(device).startswith("mps"):
-            generator = torch.manual_seed(seed)
-        else:
-            generator = torch.Generator(device="cpu").manual_seed(seed)
-
+    def get_dummy_inputs(self):
         inputs = {
             "prompt": "A painting of a squirrel eating a burger",
-            "generator": generator,
+            "generator": self.get_generator(0),
             "num_inference_steps": 2,
             "guidance_scale": 5.0,
             "height": 8,
@@ -134,10 +129,10 @@ class TestFluxPipeline(FluxPipelineTesterConfig, PipelineTesterMixin):
     def test_flux_different_prompts(self):
         pipe = self.pipeline_class(**self.get_dummy_components()).to(torch_device)
 
-        inputs = self.get_dummy_inputs(torch_device)
+        inputs = self.get_dummy_inputs()
         output_same_prompt = pipe(**inputs).images[0]
 
-        inputs = self.get_dummy_inputs(torch_device)
+        inputs = self.get_dummy_inputs()
         inputs["prompt_2"] = "a different prompt"
         output_different_prompts = pipe(**inputs).images[0]
 
@@ -149,7 +144,7 @@ class TestFluxPipeline(FluxPipelineTesterConfig, PipelineTesterMixin):
 
     def test_flux_image_output_shape(self):
         pipe = self.pipeline_class(**self.get_dummy_components()).to(torch_device)
-        inputs = self.get_dummy_inputs(torch_device)
+        inputs = self.get_dummy_inputs()
 
         height_width_pairs = [(32, 32), (72, 57)]
         for height, width in height_width_pairs:
@@ -165,7 +160,7 @@ class TestFluxPipeline(FluxPipelineTesterConfig, PipelineTesterMixin):
 
     def test_flux_true_cfg(self):
         pipe = self.pipeline_class(**self.get_dummy_components()).to(torch_device)
-        inputs = self.get_dummy_inputs(torch_device)
+        inputs = self.get_dummy_inputs()
         inputs.pop("generator")
 
         no_true_cfg_out = pipe(**inputs, generator=torch.manual_seed(0)).images[0]

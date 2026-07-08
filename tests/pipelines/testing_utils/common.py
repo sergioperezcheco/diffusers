@@ -42,7 +42,7 @@ class BasePipelineTesterConfig:
     Base class defining the configuration interface for pipeline testing.
 
     A concrete pipeline test config must set `pipeline_class` and implement `get_dummy_components()` and
-    `get_dummy_inputs(device, seed)`. `required_input_params_in_call_signature` and `batch_input_params` should be set from the canonical sets in
+    `get_dummy_inputs()`. `required_input_params_in_call_signature` and `batch_input_params` should be set from the canonical sets in
     `tests/pipelines/pipeline_params.py`. This class only declares the testing contract; the cached reference
     output lives on `BasePipelineOutputMixin` (mirroring the model-level `BaseModelOutputMixin`).
 
@@ -80,9 +80,10 @@ class BasePipelineTesterConfig:
             "See existing pipeline tests for reference."
         )
 
-    def get_dummy_inputs(self, device, seed=0):
+    def get_dummy_inputs(self):
         raise NotImplementedError(
-            "You need to implement `get_dummy_inputs(self, device, seed)` in the child test class. "
+            "You need to implement `get_dummy_inputs(self)` in the child test class. Build the inputs on "
+            "`torch_device` with a fixed seed (use the `get_generator` helper for the generator). "
             "Set `output_type='pt'` so the pipeline returns torch tensors (see the class docstring). "
             "See existing pipeline tests for reference."
         )
@@ -113,9 +114,11 @@ class BasePipelineTesterConfig:
 
     # ==================== Shared helpers ====================
 
-    def get_generator(self, seed):
-        device = torch_device if torch_device != "mps" else "cpu"
-        return torch.Generator(device).manual_seed(seed)
+    def get_generator(self, seed=0):
+        # Always build the generator on CPU: a CPU generator works with a pipeline placed on any device (the tensor
+        # is created on CPU and moved), whereas an accelerator generator cannot seed a CPU tensor (see
+        # `randn_tensor`), which `test_to_device` relies on when it runs the pipeline on CPU.
+        return torch.Generator("cpu").manual_seed(seed)
 
     # ==================== Fixtures ====================
 
@@ -159,7 +162,7 @@ class BasePipelineOutputMixin:
         pipe.to(torch_device)
         pipe.set_progress_bar_config(disable=None)
 
-        inputs = self.get_dummy_inputs(torch_device)
+        inputs = self.get_dummy_inputs()
         torch.manual_seed(0)
         return pipe(**inputs)[0]
 
@@ -197,7 +200,7 @@ class PipelineTesterMixin(BasePipelineOutputMixin):
         pipe_loaded.to(torch_device)
         pipe_loaded.set_progress_bar_config(disable=None)
 
-        inputs = self.get_dummy_inputs(torch_device)
+        inputs = self.get_dummy_inputs()
         torch.manual_seed(0)
         output_loaded = pipe_loaded(**inputs)[0]
 
@@ -239,7 +242,7 @@ class PipelineTesterMixin(BasePipelineOutputMixin):
         pipe.to(torch_device)
         pipe.set_progress_bar_config(disable=None)
 
-        inputs = self.get_dummy_inputs(torch_device)
+        inputs = self.get_dummy_inputs()
         inputs["generator"] = self.get_generator(0)
 
         logger = logging.get_logger(pipe.__module__)
@@ -289,7 +292,7 @@ class PipelineTesterMixin(BasePipelineOutputMixin):
 
         pipe.to(torch_device)
         pipe.set_progress_bar_config(disable=None)
-        inputs = self.get_dummy_inputs(torch_device)
+        inputs = self.get_dummy_inputs()
         # Reset generator in case it has been used in self.get_dummy_inputs
         inputs["generator"] = self.get_generator(0)
 
@@ -340,13 +343,12 @@ class PipelineTesterMixin(BasePipelineOutputMixin):
         pipe.to(torch_device)
         pipe.set_progress_bar_config(disable=None)
 
-        generator_device = "cpu"
         if expected_slice is None:
-            output = pipe(**self.get_dummy_inputs(generator_device))[0]
+            output = pipe(**self.get_dummy_inputs())[0]
         else:
             output = expected_slice
 
-        output_tuple = pipe(**self.get_dummy_inputs(generator_device), return_dict=False)[0]
+        output_tuple = pipe(**self.get_dummy_inputs(), return_dict=False)[0]
 
         if expected_slice is None:
             assert_tensors_close(
@@ -381,7 +383,7 @@ class PipelineTesterMixin(BasePipelineOutputMixin):
         pipe.to(torch_device, dtype)
         pipe.set_progress_bar_config(disable=None)
 
-        inputs = self.get_dummy_inputs(torch_device)
+        inputs = self.get_dummy_inputs()
         if "generator" in inputs:
             inputs["generator"] = self.get_generator(0)
         output = pipe(**inputs)[0]
@@ -427,7 +429,7 @@ class PipelineTesterMixin(BasePipelineOutputMixin):
         pipe.to(torch_device)
         pipe.set_progress_bar_config(disable=None)
 
-        inputs = self.get_dummy_inputs(torch_device)
+        inputs = self.get_dummy_inputs()
         output = pipe(**inputs)[0]
 
         pipe.save_pretrained(tmp_path)
@@ -441,7 +443,7 @@ class PipelineTesterMixin(BasePipelineOutputMixin):
                     f"`{name}.dtype` switched from `float16` to {component.dtype} after loading."
                 )
 
-        inputs = self.get_dummy_inputs(torch_device)
+        inputs = self.get_dummy_inputs()
         output_loaded = pipe_loaded(**inputs)[0]
         assert_tensors_close(
             output_loaded,
@@ -465,8 +467,7 @@ class PipelineTesterMixin(BasePipelineOutputMixin):
         for optional_component in pipe._optional_components:
             setattr(pipe, optional_component, None)
 
-        generator_device = "cpu"
-        inputs = self.get_dummy_inputs(generator_device)
+        inputs = self.get_dummy_inputs()
         torch.manual_seed(0)
         output = pipe(**inputs)[0]
 
@@ -480,7 +481,7 @@ class PipelineTesterMixin(BasePipelineOutputMixin):
                 f"`{optional_component}` did not stay set to None after loading."
             )
 
-        inputs = self.get_dummy_inputs(generator_device)
+        inputs = self.get_dummy_inputs()
         torch.manual_seed(0)
         output_loaded = pipe_loaded(**inputs)[0]
 
@@ -503,7 +504,7 @@ class PipelineTesterMixin(BasePipelineOutputMixin):
         ]
         assert all(device == "cpu" for device in model_devices)
 
-        output_cpu = pipe(**self.get_dummy_inputs("cpu"))[0]
+        output_cpu = pipe(**self.get_dummy_inputs())[0]
         assert torch.isnan(output_cpu).sum() == 0
 
         pipe.to(torch_device)
@@ -512,7 +513,7 @@ class PipelineTesterMixin(BasePipelineOutputMixin):
         ]
         assert all(device == torch_device for device in model_devices)
 
-        output_device = pipe(**self.get_dummy_inputs(torch_device))[0]
+        output_device = pipe(**self.get_dummy_inputs())[0]
         assert torch.isnan(output_device).sum() == 0
 
     def test_to_dtype(self):
@@ -543,7 +544,7 @@ class PipelineTesterMixin(BasePipelineOutputMixin):
 
         for batch_size in batch_sizes:
             for num_images_per_prompt in num_images_per_prompts:
-                inputs = self.get_dummy_inputs(torch_device)
+                inputs = self.get_dummy_inputs()
 
                 for key in inputs.keys():
                     if key in self.batch_input_params:
@@ -564,7 +565,7 @@ class PipelineTesterMixin(BasePipelineOutputMixin):
         pipe = pipe.to(torch_device)
         pipe.set_progress_bar_config(disable=None)
 
-        inputs = self.get_dummy_inputs(torch_device)
+        inputs = self.get_dummy_inputs()
 
         inputs["guidance_scale"] = 1.0
         out_no_cfg = pipe(**inputs)[0]
@@ -608,7 +609,7 @@ class PipelineTesterMixin(BasePipelineOutputMixin):
                 assert tensor_name in pipe._callback_tensor_inputs
             return callback_kwargs
 
-        inputs = self.get_dummy_inputs(torch_device)
+        inputs = self.get_dummy_inputs()
 
         # Test passing in a subset
         inputs["callback_on_step_end"] = callback_inputs_subset
@@ -658,7 +659,7 @@ class PipelineTesterMixin(BasePipelineOutputMixin):
             pipe._guidance_scale += 1.0
             return callback_kwargs
 
-        inputs = self.get_dummy_inputs(torch_device)
+        inputs = self.get_dummy_inputs()
 
         # use cfg guidance because some pipelines modify the shape of the latents outside of the denoising loop
         inputs["guidance_scale"] = 2.0
@@ -765,7 +766,7 @@ class PipelineTesterMixin(BasePipelineOutputMixin):
         pipe_with_just_text_encoder = pipe_with_just_text_encoder.to(torch_device)
 
         # Get inputs and also the args of `encode_prompts`.
-        inputs = self.get_dummy_inputs(torch_device)
+        inputs = self.get_dummy_inputs()
         encode_prompt_signature = inspect.signature(pipe_with_just_text_encoder.encode_prompt)
         encode_prompt_parameters = list(encode_prompt_signature.parameters.values())
 
@@ -850,7 +851,7 @@ class PipelineTesterMixin(BasePipelineOutputMixin):
 
         # Compare against regular pipeline outputs.
         full_pipe = self.pipeline_class(**components).to(torch_device)
-        inputs = self.get_dummy_inputs(torch_device)
+        inputs = self.get_dummy_inputs()
         pipe_out_2 = full_pipe(**inputs)[0]
 
         assert_tensors_close(
