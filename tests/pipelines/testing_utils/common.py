@@ -19,7 +19,6 @@ import json
 import os
 from typing import Callable
 
-import numpy as np
 import pytest
 import torch
 import torch.nn as nn
@@ -31,12 +30,12 @@ from diffusers.utils.source_code_parsing_utils import ReturnNameVisitor
 
 from ...testing_utils import (
     CaptureLogger,
+    assert_tensors_close,
     backend_empty_cache,
     numpy_cosine_similarity_distance,
     require_accelerator,
     torch_device,
 )
-from .utils import assert_outputs_close, to_np
 
 
 class BasePipelineTesterConfig:
@@ -52,6 +51,11 @@ class BasePipelineTesterConfig:
     (computed once per test class and reused by comparison tests). Comparison tests construct their own pipeline
     inline (mirroring the model-level testers) so the only difference from `base_pipe_output` is the behavior
     under test.
+
+    NOTE: `get_dummy_inputs` should request torch outputs (`output_type="pt"`) so tests operate on torch tensors
+    exclusively and compare with `assert_tensors_close` directly (no numpy round-trip). Keep in mind that `"pt"`
+    image outputs are laid out as `(batch, channels, height, width)`, unlike the `(batch, height, width, channels)`
+    layout produced by `output_type="np"`.
     """
 
     # Canonical parameters that are passed to `__call__` regardless of the type of pipeline. They are always
@@ -85,6 +89,7 @@ class BasePipelineTesterConfig:
     def get_dummy_inputs(self, device, seed=0):
         raise NotImplementedError(
             "You need to implement `get_dummy_inputs(self, device, seed)` in the child test class. "
+            "Set `output_type='pt'` so the pipeline returns torch tensors (see the class docstring). "
             "See existing pipeline tests for reference."
         )
 
@@ -193,7 +198,7 @@ class PipelineTesterMixin:
         torch.manual_seed(0)
         output_loaded = pipe_loaded(**inputs)[0]
 
-        assert_outputs_close(
+        assert_tensors_close(
             output_loaded, base_pipe_output, atol=expected_max_difference, msg="Loaded pipeline output changed."
         )
 
@@ -316,7 +321,7 @@ class PipelineTesterMixin:
 
         assert output_batch[0].shape[0] == batch_size
 
-        assert_outputs_close(
+        assert_tensors_close(
             output_batch[0][0], output[0][0], atol=expected_max_diff, msg="Batched output differs from single."
         )
 
@@ -339,15 +344,15 @@ class PipelineTesterMixin:
         output_tuple = pipe(**self.get_dummy_inputs(generator_device), return_dict=False)[0]
 
         if expected_slice is None:
-            assert_outputs_close(
+            assert_tensors_close(
                 output_tuple, output, atol=expected_max_difference, msg="Dict and tuple outputs are not equal."
             )
         else:
             if output_tuple.ndim != 5:
-                output_tuple_slice = to_np(output_tuple)[0, -3:, -3:, -1].flatten()
+                output_tuple_slice = output_tuple[0, -3:, -3:, -1].flatten()
             else:
-                output_tuple_slice = to_np(output_tuple)[0, -3:, -3:, -1, -1].flatten()
-            assert_outputs_close(
+                output_tuple_slice = output_tuple[0, -3:, -3:, -1, -1].flatten()
+            assert_tensors_close(
                 output_tuple_slice, output, atol=expected_max_difference, msg="Dict and tuple outputs are not equal."
             )
 
@@ -384,9 +389,8 @@ class PipelineTesterMixin:
             fp16_inputs["generator"] = self.get_generator(0)
         output_fp16 = pipe_fp16(**fp16_inputs)[0]
 
-        if isinstance(output, torch.Tensor):
-            output = output.cpu()
-            output_fp16 = output_fp16.cpu()
+        output = output.cpu().numpy()
+        output_fp16 = output_fp16.cpu().numpy()
 
         max_diff = numpy_cosine_similarity_distance(output.flatten(), output_fp16.flatten())
         assert max_diff < expected_max_diff
@@ -444,7 +448,7 @@ class PipelineTesterMixin:
 
         inputs = self.get_dummy_inputs(torch_device)
         output_loaded = pipe_loaded(**inputs)[0]
-        assert_outputs_close(
+        assert_tensors_close(
             output_loaded,
             output,
             atol=expected_max_diff,
@@ -485,7 +489,7 @@ class PipelineTesterMixin:
         torch.manual_seed(0)
         output_loaded = pipe_loaded(**inputs)[0]
 
-        assert_outputs_close(
+        assert_tensors_close(
             output_loaded,
             output,
             atol=expected_max_difference,
@@ -505,7 +509,7 @@ class PipelineTesterMixin:
         assert all(device == "cpu" for device in model_devices)
 
         output_cpu = pipe(**self.get_dummy_inputs("cpu"))[0]
-        assert np.isnan(output_cpu).sum() == 0
+        assert torch.isnan(output_cpu).sum() == 0
 
         pipe.to(torch_device)
         model_devices = [
@@ -514,7 +518,7 @@ class PipelineTesterMixin:
         assert all(device == torch_device for device in model_devices)
 
         output_device = pipe(**self.get_dummy_inputs(torch_device))[0]
-        assert np.isnan(to_np(output_device)).sum() == 0
+        assert torch.isnan(output_device).sum() == 0
 
     def test_to_dtype(self):
         components = self.get_dummy_components()
@@ -854,7 +858,7 @@ class PipelineTesterMixin:
         inputs = self.get_dummy_inputs(torch_device)
         pipe_out_2 = full_pipe(**inputs)[0]
 
-        assert_outputs_close(
+        assert_tensors_close(
             pipe_out, pipe_out_2, atol=atol, rtol=rtol, msg="`encode_prompt` in isolation changed the output."
         )
 

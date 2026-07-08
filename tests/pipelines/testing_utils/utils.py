@@ -13,28 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import torch
-
 from diffusers.models.attention import AttentionModuleMixin
-
-from ...testing_utils import assert_tensors_close
-
-
-def to_np(tensor):
-    if isinstance(tensor, torch.Tensor):
-        tensor = tensor.detach().cpu().numpy()
-
-    return tensor
-
-
-def assert_outputs_close(actual, expected, atol=1e-4, rtol=0.0, msg=""):
-    """
-    `assert_tensors_close` for pipeline outputs, which are usually numpy arrays (`output_type="np"`). Mirrors the
-    model-level assertion style (concise diff messages) while accepting numpy/torch outputs.
-    """
-    assert_tensors_close(
-        torch.as_tensor(to_np(actual)), torch.as_tensor(to_np(expected)), atol=atol, rtol=rtol, msg=msg
-    )
 
 
 def check_same_shape(tensor_list):

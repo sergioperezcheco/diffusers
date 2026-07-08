@@ -15,7 +15,6 @@
 
 import inspect
 
-import numpy as np
 import pytest
 import torch
 
@@ -27,8 +26,7 @@ from diffusers.hooks.pyramid_attention_broadcast import PyramidAttentionBroadcas
 from diffusers.hooks.taylorseer_cache import TaylorSeerCacheConfig
 from diffusers.utils import logging
 
-from ...testing_utils import CaptureLogger, is_cache
-from .utils import assert_outputs_close
+from ...testing_utils import CaptureLogger, assert_tensors_close, is_cache
 
 
 class CacheTesterMixin:
@@ -58,7 +56,7 @@ class CacheTesterMixin:
         # Run inference without cache
         pipe = create_pipe()
         output = run_forward(pipe).flatten()
-        original_image_slice = np.concatenate((output[:8], output[-8:]))
+        original_image_slice = torch.cat((output[:8], output[-8:]))
 
         # Run inference with cache enabled
         pipe = create_pipe()
@@ -66,21 +64,21 @@ class CacheTesterMixin:
             cache_config.current_timestep_callback = lambda: pipe.current_timestep
         pipe.transformer.enable_cache(cache_config)
         output = run_forward(pipe).flatten()
-        image_slice_enabled = np.concatenate((output[:8], output[-8:]))
+        image_slice_enabled = torch.cat((output[:8], output[-8:]))
 
         # Run inference with cache disabled
         pipe.transformer.disable_cache()
         output = run_forward(pipe).flatten()
-        image_slice_disabled = np.concatenate((output[:8], output[-8:]))
+        image_slice_disabled = torch.cat((output[:8], output[-8:]))
 
-        assert_outputs_close(
+        assert_tensors_close(
             image_slice_enabled,
             original_image_slice,
             atol=expected_atol,
             rtol=1e-5,
             msg="Cached outputs should not differ much in the specified timestep range.",
         )
-        assert_outputs_close(
+        assert_tensors_close(
             image_slice_disabled,
             original_image_slice,
             atol=1e-4,
@@ -184,7 +182,7 @@ class PyramidAttentionBroadcastTesterMixin(CacheTesterMixin):
         inputs["num_inference_steps"] = 4
         output = pipe(**inputs)[0]
         original_image_slice = output.flatten()
-        original_image_slice = np.concatenate((original_image_slice[:8], original_image_slice[-8:]))
+        original_image_slice = torch.cat((original_image_slice[:8], original_image_slice[-8:]))
 
         # Run inference with PAB enabled
         self.pab_config.current_timestep_callback = lambda: pipe.current_timestep
@@ -195,7 +193,7 @@ class PyramidAttentionBroadcastTesterMixin(CacheTesterMixin):
         inputs["num_inference_steps"] = 4
         output = pipe(**inputs)[0]
         image_slice_pab_enabled = output.flatten()
-        image_slice_pab_enabled = np.concatenate((image_slice_pab_enabled[:8], image_slice_pab_enabled[-8:]))
+        image_slice_pab_enabled = torch.cat((image_slice_pab_enabled[:8], image_slice_pab_enabled[-8:]))
 
         # Run inference with PAB disabled
         denoiser.disable_cache()
@@ -204,16 +202,16 @@ class PyramidAttentionBroadcastTesterMixin(CacheTesterMixin):
         inputs["num_inference_steps"] = 4
         output = pipe(**inputs)[0]
         image_slice_pab_disabled = output.flatten()
-        image_slice_pab_disabled = np.concatenate((image_slice_pab_disabled[:8], image_slice_pab_disabled[-8:]))
+        image_slice_pab_disabled = torch.cat((image_slice_pab_disabled[:8], image_slice_pab_disabled[-8:]))
 
-        assert_outputs_close(
+        assert_tensors_close(
             image_slice_pab_enabled,
             original_image_slice,
             atol=expected_atol,
             rtol=1e-5,
             msg="PAB outputs should not differ much in specified timestep range.",
         )
-        assert_outputs_close(
+        assert_tensors_close(
             image_slice_pab_disabled,
             original_image_slice,
             atol=1e-4,

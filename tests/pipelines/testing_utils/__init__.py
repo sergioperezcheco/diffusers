@@ -15,12 +15,10 @@ from .memory import (
     PipelineOffloadTesterMixin,
 )
 from .utils import (
-    assert_outputs_close,
     check_qkv_fused_layers_exist,
     check_qkv_fusion_matches_attn_procs_length,
     check_qkv_fusion_processors_exist,
     check_same_shape,
-    to_np,
 )
 
 
@@ -38,10 +36,8 @@ __all__ = [
     "TaylorSeerCacheTesterMixin",
     "MagCacheTesterMixin",
     "FluxIPAdapterTesterMixin",
-    "assert_outputs_close",
     "check_qkv_fused_layers_exist",
     "check_qkv_fusion_matches_attn_procs_length",
     "check_qkv_fusion_processors_exist",
     "check_same_shape",
-    "to_np",
 ]

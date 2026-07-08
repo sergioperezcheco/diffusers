@@ -20,6 +20,7 @@ from diffusers import DiffusionPipeline
 from diffusers.hooks import apply_group_offloading
 
 from ...testing_utils import (
+    assert_tensors_close,
     is_accelerate_available,
     is_cpu_offload,
     is_group_offload,
@@ -29,7 +30,6 @@ from ...testing_utils import (
     require_torch_accelerator,
     torch_device,
 )
-from .utils import assert_outputs_close
 
 
 if is_accelerate_available():
@@ -58,7 +58,7 @@ class PipelineOffloadTesterMixin:
         torch.manual_seed(0)
         output_with_offload = pipe(**inputs)[0]
 
-        assert_outputs_close(
+        assert_tensors_close(
             output_with_offload,
             base_pipe_output,
             atol=expected_max_diff,
@@ -114,7 +114,7 @@ class PipelineOffloadTesterMixin:
         torch.manual_seed(0)
         output_with_offload = pipe(**inputs)[0]
 
-        assert_outputs_close(
+        assert_tensors_close(
             output_with_offload,
             base_pipe_output,
             atol=expected_max_diff,
@@ -161,7 +161,7 @@ class PipelineOffloadTesterMixin:
         inputs = self.get_dummy_inputs(generator_device)
         output_with_offload_twice = pipe(**inputs)[0]
 
-        assert_outputs_close(
+        assert_tensors_close(
             output_with_offload,
             output_with_offload_twice,
             atol=expected_max_diff,
@@ -208,7 +208,7 @@ class PipelineOffloadTesterMixin:
         inputs = self.get_dummy_inputs(generator_device)
         output_with_offload_twice = pipe(**inputs)[0]
 
-        assert_outputs_close(
+        assert_tensors_close(
             output_with_offload,
             output_with_offload_twice,
             atol=expected_max_diff,
@@ -261,7 +261,7 @@ class PipelineOffloadTesterMixin:
         inputs = self.get_dummy_inputs(torch_device)
         torch.manual_seed(0)
         loaded_out = loaded_pipe(**inputs)[0]
-        assert_outputs_close(
+        assert_tensors_close(
             loaded_out, base_pipe_output, atol=expected_max_difference, msg="device_map loaded output changed."
         )
 
@@ -356,19 +356,14 @@ class GroupOffloadTesterMixin:
         enable_group_offload_on_component(pipe, {"offload_type": "leaf_level"})
         output_with_group_offloading2 = run_forward(pipe)
 
-        if torch.is_tensor(output_without_group_offloading):
-            output_without_group_offloading = output_without_group_offloading.detach().cpu().numpy()
-            output_with_group_offloading1 = output_with_group_offloading1.detach().cpu().numpy()
-            output_with_group_offloading2 = output_with_group_offloading2.detach().cpu().numpy()
-
-        assert_outputs_close(
+        assert_tensors_close(
             output_with_group_offloading1,
             output_without_group_offloading,
             atol=1e-4,
             rtol=1e-5,
             msg="block-level group offloading should not affect the inference results",
         )
-        assert_outputs_close(
+        assert_tensors_close(
             output_with_group_offloading2,
             output_without_group_offloading,
             atol=1e-4,
@@ -436,7 +431,7 @@ class GroupOffloadTesterMixin:
         torch.manual_seed(0)
         out_offload = pipe(**inputs)[0]
 
-        assert_outputs_close(
+        assert_tensors_close(
             out_offload,
             base_pipe_output,
             atol=expected_max_difference,

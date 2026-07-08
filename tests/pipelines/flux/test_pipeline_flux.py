@@ -121,7 +121,9 @@ class FluxPipelineTesterConfig(BasePipelineTesterConfig):
             "height": 8,
             "width": 8,
             "max_sequence_length": 48,
-            "output_type": "np",
+            # Request torch outputs so tests compare torch tensors directly (see `BasePipelineTesterConfig`).
+            # Note `"pt"` images are `(batch, channels, height, width)`, unlike `"np"` (`(batch, h, w, c)`).
+            "output_type": "pt",
         }
         return inputs
 
@@ -137,7 +139,7 @@ class TestFluxPipeline(FluxPipelineTesterConfig, PipelineTesterMixin):
         inputs["prompt_2"] = "a different prompt"
         output_different_prompts = pipe(**inputs).images[0]
 
-        max_diff = np.abs(output_same_prompt - output_different_prompts).max()
+        max_diff = (output_same_prompt - output_different_prompts).abs().max()
 
         # Outputs should be different here
         # For some reasons, they don't show large differences
@@ -154,7 +156,7 @@ class TestFluxPipeline(FluxPipelineTesterConfig, PipelineTesterMixin):
 
             inputs.update({"height": height, "width": width})
             image = pipe(**inputs).images[0]
-            output_height, output_width, _ = image.shape
+            _, output_height, output_width = image.shape
             assert (output_height, output_width) == (expected_height, expected_width), (
                 f"Output shape {image.shape} does not match expected shape {(expected_height, expected_width)}"
             )
@@ -168,7 +170,7 @@ class TestFluxPipeline(FluxPipelineTesterConfig, PipelineTesterMixin):
         inputs["negative_prompt"] = "bad quality"
         inputs["true_cfg_scale"] = 2.0
         true_cfg_out = pipe(**inputs, generator=torch.manual_seed(0)).images[0]
-        assert not np.allclose(no_true_cfg_out, true_cfg_out), (
+        assert not torch.allclose(no_true_cfg_out, true_cfg_out), (
             "Outputs should be different when true_cfg_scale is set."
         )
 

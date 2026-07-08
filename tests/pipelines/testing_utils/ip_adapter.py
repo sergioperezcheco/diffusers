@@ -16,14 +16,12 @@
 import inspect
 from typing import Any, Dict
 
-import numpy as np
 import torch
 
 from diffusers.loaders import FluxIPAdapterMixin
 
 from ...models.transformers.test_models_transformer_flux import create_flux_ip_adapter_state_dict
-from ...testing_utils import is_ip_adapter, torch_device
-from .utils import assert_outputs_close
+from ...testing_utils import assert_tensors_close, is_ip_adapter, torch_device
 
 
 @is_ip_adapter
@@ -51,7 +49,8 @@ class FluxIPAdapterTesterMixin:
         inputs["negative_prompt"] = ""
         if "true_cfg_scale" in inspect.signature(self.pipeline_class.__call__).parameters:
             inputs["true_cfg_scale"] = 4.0
-        inputs["output_type"] = "np"
+        # Request torch outputs so comparisons run on torch tensors directly (see `BasePipelineTesterConfig`).
+        inputs["output_type"] = "pt"
         inputs["return_dict"] = False
         return inputs
 
@@ -106,13 +105,13 @@ class FluxIPAdapterTesterMixin:
         if expected_pipe_slice is not None:
             output_with_adapter_scale = output_with_adapter_scale[0, -3:, -3:, -1].flatten()
 
-        assert_outputs_close(
+        assert_tensors_close(
             output_without_adapter_scale,
             output_without_adapter,
             atol=expected_max_diff,
             msg="Output without ip-adapter must be same as normal inference",
         )
-        max_diff_with_adapter_scale = np.abs(output_with_adapter_scale - output_without_adapter).max()
+        max_diff_with_adapter_scale = (output_with_adapter_scale - output_without_adapter).abs().max()
         assert max_diff_with_adapter_scale > 1e-2, "Output with ip-adapter must be different from normal inference"
 
         # 2. Multi IP-Adapter test cases
@@ -138,13 +137,13 @@ class FluxIPAdapterTesterMixin:
         if expected_pipe_slice is not None:
             output_with_multi_adapter_scale = output_with_multi_adapter_scale[0, -3:, -3:, -1].flatten()
 
-        assert_outputs_close(
+        assert_tensors_close(
             output_without_multi_adapter_scale,
             output_without_adapter,
             atol=expected_max_diff,
             msg="Output without multi-ip-adapter must be same as normal inference",
         )
-        max_diff_with_multi_adapter_scale = np.abs(output_with_multi_adapter_scale - output_without_adapter).max()
+        max_diff_with_multi_adapter_scale = (output_with_multi_adapter_scale - output_without_adapter).abs().max()
         assert max_diff_with_multi_adapter_scale > 1e-2, (
             "Output with multi-ip-adapter scale must be different from normal inference"
         )
