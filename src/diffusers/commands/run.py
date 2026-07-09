@@ -748,23 +748,6 @@ def _kwargs_to_argv(task: str, task_kwargs: dict[str, Any]) -> list[str]:
     return argv
 
 
-def _send_remote_telemetry() -> None:
-    """Attribute this ``--remote`` submission to the diffusers CLI.
-
-    Respects ``HF_HUB_DISABLE_TELEMETRY`` / ``HF_HUB_OFFLINE``. Network failures are swallowed inside the hub's own
-    daemon-thread worker.
-    """
-    from huggingface_hub.utils import send_telemetry
-
-    import diffusers
-
-    send_telemetry(
-        topic="diffusers/cli/run/remote",
-        library_name="diffusers",
-        library_version=diffusers.__version__,
-    )
-
-
 def _maybe_upload_local_media(args: Namespace, api: Any, run_id: str) -> bool:
     """Upload any local media paths in ``--pipeline-kwargs`` to the artifacts bucket.
 
@@ -821,6 +804,9 @@ def _maybe_submit_remote(args: Namespace, task: str) -> bool:
     import shlex
 
     from huggingface_hub import HfApi, get_token, run_job
+    from huggingface_hub.utils import send_telemetry
+
+    import diffusers
 
     hf_token = args.token or get_token()
     api = HfApi(token=hf_token)
@@ -881,7 +867,11 @@ def _maybe_submit_remote(args: Namespace, task: str) -> bool:
         env=env,
         token=hf_token,
     )
-    _send_remote_telemetry()
+    send_telemetry(
+        topic="diffusers/cli/run/remote",
+        library_name="diffusers",
+        library_version=diffusers.__version__,
+    )
 
     payload: dict[str, Any] = {
         "task": "remote-submit",
