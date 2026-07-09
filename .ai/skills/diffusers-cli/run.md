@@ -73,9 +73,6 @@ LoRA or `lora_id` is missing.
 - `--vae-tiling` / `--vae-slicing` — lower peak VAE decode VRAM.
 - `--context-parallel` — Ulysses-style context parallelism on a DiT. See [Context parallel](#context-parallel) below.
 
-`disable_mmap=True` is always passed to `from_pretrained` — sequential reads are faster than mmap page-faults on
-most filesystems.
-
 ## Output handling
 
 `run` sniffs the pipeline return type and saves accordingly:

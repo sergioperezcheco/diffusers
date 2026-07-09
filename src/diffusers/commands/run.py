@@ -439,7 +439,6 @@ def _load_pipeline(args: Namespace, modular: bool) -> Any:
     dtype = _resolve_dtype(args.dtype)
     common_kwargs: dict[str, Any] = {
         "trust_remote_code": args.trust_remote_code,
-        "disable_mmap": True,
     }
     if dtype != "auto":
         common_kwargs["torch_dtype"] = dtype
@@ -468,11 +467,6 @@ def _load_pipeline(args: Namespace, modular: bool) -> Any:
     _apply_optimizations(pipeline, args)
 
     return pipeline
-
-
-# ---------------------------------------------------------------------------
-# Modular pipeline detection + introspection
-# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------
