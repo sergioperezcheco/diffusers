@@ -1025,16 +1025,15 @@ class RunCommand(BaseDiffusersCLICommand):
         except OSError:
             is_modular = True
 
-        # Validate --pipeline-kwargs locally before spending a job submission on it. Image inputs
-        # stay unresolved here — they need to be fetched inside the container (or locally if not
-        # --remote) so we don't waste bandwidth downloading and re-uploading them.
         call_kwargs = _parse_pipeline_kwargs(self.args.pipeline_kwargs)
 
         if _maybe_submit_remote(self.args, self.task):
             return
 
-        pipeline = _load_pipeline(self.args, modular=is_modular)
+        # Resolve media before loading pipeline weights so dead URLs / missing files fail
+        # fast — cheap to fetch, expensive to load a 20GB model just to hit a 404.
         _resolve_media_inputs(call_kwargs)
+        pipeline = _load_pipeline(self.args, modular=is_modular)
 
         if self.args.output_key is not None:
             call_kwargs["output"] = self.args.output_key
