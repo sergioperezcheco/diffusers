@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``diffusers-cli custom_blocks`` — package a local ``ModularPipelineBlocks`` subclass for the Hub.
+"""`diffusers-cli custom_blocks` — package a local `ModularPipelineBlocks` subclass for the Hub.
 
-Parses ``block.py`` (or ``--block_module_name``), instantiates the chosen block, and calls ``save_pretrained`` in the
-current working directory.
+Parses `block.py` (or `--block_module_name`), instantiates the chosen block, and calls `save_pretrained` in the current
+working directory.
 """
 
 import ast

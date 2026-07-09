@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``diffusers-cli run`` — single agentic entry point.
+"""`diffusers-cli run` — single agentic entry point.
 
-Runs any diffusers pipeline (standard or modular) by forwarding ``--pipeline-kwargs`` verbatim, saves the output by
-sniffing its runtime type, and can submit the same call to HF Jobs via ``--remote``.
+Runs any diffusers pipeline (standard or modular) by forwarding `--pipeline-kwargs` verbatim, saves the output by
+sniffing its runtime type, and can submit the same call to HF Jobs via `--remote`.
 """
 
 from __future__ import annotations
@@ -50,8 +50,8 @@ CPU_OFFLOAD_CHOICES = ("model", "group")
 ATTENTION_BACKEND_CHOICES = ("default", *sorted(b.value for b in _HUB_KERNELS_REGISTRY))
 
 # Kwarg keys whose string value gets auto-loaded before being passed to the pipeline call.
-# Images resolve via ``diffusers.utils.load_image`` → PIL.Image.Image; videos resolve via
-# ``diffusers.utils.load_video`` → list[PIL.Image.Image].
+# Images resolve via `diffusers.utils.load_image` → PIL.Image.Image; videos resolve via
+# `diffusers.utils.load_video` → list[PIL.Image.Image].
 _IMAGE_INPUT_KEYS = (
     "image",
     "mask_image",
@@ -70,7 +70,7 @@ _AUDIO_INPUT_KEYS = (
 )
 
 # Pipeline attribute prefixes that identify a denoiser submodule. Matches base names
-# (``transformer``, ``unet``) and their numbered variants (``transformer_2``, etc.).
+# (`transformer`, `unet`) and their numbered variants (`transformer_2`, etc.).
 _DENOISER_COMPONENT_KEYS = ("transformer", "unet")
 
 _DEFAULT_REMOTE_DEPS = (
@@ -82,7 +82,7 @@ _DEFAULT_REMOTE_DEPS = (
     "ftfy",  # required by older CLIP text-encoder paths
 )
 
-# Base container image — provides torch + CUDA so ``uv pip install --system``
+# Base container image — provides torch + CUDA so `uv pip install --system`
 # only has to add the small Python deps. cuda12.8 is the highest cuda12.x tag
 # below the HF Jobs host driver's CUDA 12.9 max.
 _DEFAULT_REMOTE_IMAGE = "pytorch/pytorch:2.10.0-cuda12.8-cudnn9-runtime"
@@ -91,7 +91,7 @@ _DEFAULT_REMOTE_IMAGE = "pytorch/pytorch:2.10.0-cuda12.8-cudnn9-runtime"
 _CONTAINER_CLI_BINARY = "diffusers-cli"
 
 # Mount path inside the container for the bucket volume that carries local media
-# uploaded from ``--pipeline-kwargs`` for ``--remote`` runs.
+# uploaded from `--pipeline-kwargs` for `--remote` runs.
 _INPUTS_MOUNT_ROOT = "/mnt/inputs"
 
 RUN_ID_ENV = "DIFFUSERS_CLI_RUN_ID"
@@ -176,8 +176,8 @@ def _add_optimization_arguments(parser: ArgumentParser) -> None:
         metavar="JSON",
         help=(
             "torch.compile every denoiser submodule on the pipeline. Accepts an optional JSON "
-            'object of kwargs forwarded to ``torch.compile``, e.g. \'{"mode": "max-autotune", '
-            '"fullgraph": true}\'. Bare ``--compile`` uses ``mode=max-autotune-no-cudagraphs`` — '
+            'object of kwargs forwarded to `torch.compile`, e.g. \'{"mode": "max-autotune", '
+            '"fullgraph": true}\'. Bare `--compile` uses `mode=max-autotune-no-cudagraphs` — '
             "CUDA Graphs break with regional/repeated-block compile because sequential blocks "
             "overwrite each other's output buffers. Adds a one-time compilation cost on the first "
             "step but speeds up every subsequent step — worth it for multi-step generation (50+ steps)."
@@ -297,7 +297,7 @@ def _resolve_device(name: str | None) -> str:
 
 
 def _map_to_device(pipeline: Any, args: Namespace, device: str) -> Any:
-    """Move the pipeline to ``device``, or hand off to the chosen CPU-offload helper."""
+    """Move the pipeline to `device`, or hand off to the chosen CPU-offload helper."""
     if args.cpu_offload is None:
         return pipeline.to(device)
 
@@ -378,14 +378,14 @@ def _apply_optimizations(pipeline: Any, args: Namespace) -> None:
 
 
 def _compile_denoiser(pipeline: Any, compile_spec: str) -> None:
-    """Compile every ``transformer*`` and ``unet*`` submodule on the pipeline.
+    """Compile every `transformer*` and `unet*` submodule on the pipeline.
 
-    ``compile_spec`` is the raw JSON string from ``--compile`` (``"{}"`` for bare flag). Decoded into kwargs and
-    forwarded verbatim to the compile call.
+    `compile_spec` is the raw JSON string from `--compile` (`"{}"` for bare flag). Decoded into kwargs and forwarded
+    verbatim to the compile call.
 
-    Prefers regional compilation via ``module.compile_repeated_blocks(**kwargs)`` — only compiles the repeated inner
+    Prefers regional compilation via `module.compile_repeated_blocks(**kwargs)` — only compiles the repeated inner
     blocks (the bulk of the compute), much faster first-step latency than compiling the whole module. Falls back to
-    full ``torch.compile`` if the model doesn't expose ``_repeated_blocks``.
+    full `torch.compile` if the model doesn't expose `_repeated_blocks`.
     """
     import torch
 
@@ -412,7 +412,7 @@ def _compile_denoiser(pipeline: Any, compile_spec: str) -> None:
 
 
 def _load_lora(pipeline: Any, args: Namespace) -> None:
-    """Attach a LoRA adapter from a JSON spec like ``{"lora_id": "...", "lora_scale": 0.8}``."""
+    """Attach a LoRA adapter from a JSON spec like `{"lora_id": "...", "lora_scale": 0.8}`."""
     if not args.lora:
         return
     try:
@@ -493,7 +493,7 @@ def _parse_pipeline_kwargs(raw: str | None) -> dict[str, Any]:
 
 
 def _load_audio(url_or_path: str) -> tuple[Any, int]:
-    """Load audio from a URL or local path via torchaudio. Returns ``(waveform, sampling_rate)``."""
+    """Load audio from a URL or local path via torchaudio. Returns `(waveform, sampling_rate)`."""
     import torchaudio
 
     if url_or_path.startswith(("http://", "https://")):
@@ -510,9 +510,9 @@ def _load_audio(url_or_path: str) -> tuple[Any, int]:
 def _resolve_media_inputs(call_kwargs: dict[str, Any]) -> None:
     """Replace string paths/URLs at known media-input keys with loaded tensors.
 
-    Images resolve to ``PIL.Image.Image`` via ``load_image``; videos to ``list[PIL.Image.Image]`` via ``load_video``;
-    audio to a ``torch.Tensor`` via ``_load_audio`` (also auto-sets the paired sampling-rate kwarg for
-    ``initial_audio_waveforms`` if the user didn't supply it). Non-string values pass through untouched.
+    Images resolve to `PIL.Image.Image` via `load_image`; videos to `list[PIL.Image.Image]` via `load_video`; audio to
+    a `torch.Tensor` via `_load_audio` (also auto-sets the paired sampling-rate kwarg for `initial_audio_waveforms` if
+    the user didn't supply it). Non-string values pass through untouched.
     """
     for key in _IMAGE_INPUT_KEYS:
         value = call_kwargs.get(key)
@@ -559,8 +559,8 @@ def _unwrap_pipeline_output(result: Any) -> Any:
 def _get_or_create_run_id() -> str:
     """Return the current run's id, creating one if not yet set.
 
-    Format: ``diffusers-run-<YYYYMMDDTHHMMSS>-<6-char-uuid>``. Same id is reused as the local output subdirectory, the
-    remote bucket prefix, and the container-side ``RUN_ID_ENV`` so a run's artifacts are traceable end-to-end.
+    Format: `diffusers-run-<YYYYMMDDTHHMMSS>-<6-char-uuid>`. Same id is reused as the local output subdirectory, the
+    remote bucket prefix, and the container-side `RUN_ID_ENV` so a run's artifacts are traceable end-to-end.
     """
     import uuid
     from datetime import datetime
@@ -636,9 +636,9 @@ def _as_audio_arrays(value: Any):
 
 
 def _save_audio_arrays(audios, sampling_rate: int, args: Namespace, task: str) -> list[str]:
-    """Write each numpy audio array to a 16-bit PCM WAV at ``sampling_rate`` Hz.
+    """Write each numpy audio array to a 16-bit PCM WAV at `sampling_rate` Hz.
 
-    Uses the stdlib ``wave`` module so no scipy dependency is required.
+    Uses the stdlib `wave` module so no scipy dependency is required.
     """
     import wave
 
@@ -670,7 +670,7 @@ def _save_audio_arrays(audios, sampling_rate: int, args: Namespace, task: str) -
 
 
 def _save_output(value: Any, args: Namespace, task: str) -> list[str]:
-    """Save ``value`` by sniffing its runtime type."""
+    """Save `value` by sniffing its runtime type."""
     pil_images = _as_pil_list(value)
     if pil_images is not None:
         paths = _resolve_output_paths(task, len(pil_images), args.output, ext="png")
@@ -701,7 +701,7 @@ def _save_output(value: Any, args: Namespace, task: str) -> list[str]:
 
 
 def _push_outputs(args: Namespace, saved_paths: list[str], task: str) -> dict[str, Any] | None:
-    """Upload ``saved_paths`` to the ``--push-to`` bucket. Returns a summary or None."""
+    """Upload `saved_paths` to the `--push-to` bucket. Returns a summary or None."""
     if not args.push_to:
         return None
 
@@ -734,7 +734,7 @@ def _build_task_kwargs(args: Namespace) -> dict[str, Any]:
 
 
 def _kwargs_to_argv(task: str, task_kwargs: dict[str, Any]) -> list[str]:
-    """Render ``task_kwargs`` as the argv list the container's argparse will see."""
+    """Render `task_kwargs` as the argv list the container's argparse will see."""
     argv: list[str] = [task]
     for key, value in task_kwargs.items():
         flag = "--" + key.replace("_", "-")
@@ -749,13 +749,13 @@ def _kwargs_to_argv(task: str, task_kwargs: dict[str, Any]) -> list[str]:
 
 
 def _maybe_upload_local_media(args: Namespace, api: Any, run_id: str) -> bool:
-    """Upload any local media paths in ``--pipeline-kwargs`` to the artifacts bucket.
+    """Upload any local media paths in `--pipeline-kwargs` to the artifacts bucket.
 
     Walks known image/video-input keys; any string value that resolves to a local file is uploaded to
-    ``<bucket>/<run_id>/inputs/<key>_<basename>`` and the JSON is rewritten so the container sees the mounted-volume
-    path instead. Returns True iff any files were uploaded (caller then mounts the bucket at ``_INPUTS_MOUNT_ROOT``).
+    `<bucket>/<run_id>/inputs/<key>_<basename>` and the JSON is rewritten so the container sees the mounted-volume path
+    instead. Returns True iff any files were uploaded (caller then mounts the bucket at `_INPUTS_MOUNT_ROOT`).
 
-    URLs, ``hf://`` URIs, and non-existent paths pass through untouched.
+    URLs, `hf://` URIs, and non-existent paths pass through untouched.
     """
     if not args.pipeline_kwargs:
         return False
@@ -791,7 +791,7 @@ def _maybe_upload_local_media(args: Namespace, api: Any, run_id: str) -> bool:
 
 
 def _maybe_submit_remote(args: Namespace, task: str) -> bool:
-    """If ``--remote`` was set, submit this invocation to HF Jobs and return True."""
+    """If `--remote` was set, submit this invocation to HF Jobs and return True."""
     if not args.remote:
         return False
 
@@ -899,7 +899,7 @@ def _maybe_submit_remote(args: Namespace, task: str) -> bool:
 
 
 def _job_timing(api: Any, job_id: str, namespace: str | None) -> dict[str, float | None]:
-    """Return queue/run/total wallclock seconds for ``job_id`` from inspect_job timestamps.
+    """Return queue/run/total wallclock seconds for `job_id` from inspect_job timestamps.
 
     inspect_job sometimes returns finished_at=None for a few seconds after the container exits while HF Jobs propagates
     the terminal state; retry briefly so we don't miss run/total.
@@ -942,7 +942,7 @@ def _wait_for_job(api: Any, job_id: str, namespace: str | None, poll_interval: f
 
 
 def _poll_for_job(api: Any, job_id: str, namespace: str | None, poll_interval: float) -> str:
-    """Heartbeat-style fallback when ``fetch_job_logs`` isn't available."""
+    """Heartbeat-style fallback when `fetch_job_logs` isn't available."""
     import time
 
     terminal = {"COMPLETED", "CANCELED", "ERROR", "DELETED"}
@@ -964,7 +964,7 @@ def _poll_for_job(api: Any, job_id: str, namespace: str | None, poll_interval: f
 
 
 def _download_job_artifacts(api: Any, bucket_id: str, run_id: str, output: str | None) -> list[str]:
-    """Download every file under ``<run_id>/`` from ``bucket_id`` into a local directory."""
+    """Download every file under `<run_id>/` from `bucket_id` into a local directory."""
     from huggingface_hub import BucketFile
 
     local_dir = Path(output) if output else Path(DEFAULT_OUTPUT_DIR) / run_id

@@ -11,18 +11,18 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""``diffusers-cli skills`` — install agent skill bundles into multiple AI coding agents.
+"""`diffusers-cli skills` — install agent skill bundles into multiple AI coding agents.
 
-Skill bundles live under ``.ai/skills/<name>/`` in the diffusers repo. ``install`` fetches a bundle via the GitHub
-Contents API and writes it in the format expected by each target agent:
+Skill bundles live under `.ai/skills/<name>/` in the diffusers repo. `install` fetches a bundle via the GitHub Contents
+API and writes it in the format expected by each target agent:
 
-- ``claude`` → ``.claude/skills/<name>/`` (bundle copied verbatim)
-- ``cursor`` → ``.cursor/rules/<name>.mdc`` (frontmatter rewritten for Cursor)
-- ``agents-md`` → ``AGENTS.md`` section (covers Codex, Aider, etc.)
+- `claude` → `.claude/skills/<name>/` (bundle copied verbatim)
+- `cursor` → `.cursor/rules/<name>.mdc` (frontmatter rewritten for Cursor)
+- `agents-md` → `AGENTS.md` section (covers Codex, Aider, etc.)
 
-Default is auto-detect via env vars set by known agents (``CLAUDECODE``, ``CURSOR_AI``, ``CODEX_SANDBOX``,
-``AIDER_AI_CONTEXT``). If no agent is detected, writes to all three so the bundle is available no matter which agent
-the user later switches to. Override with ``--agents claude,cursor`` etc.
+Default is auto-detect via env vars set by known agents (`CLAUDECODE`, `CURSOR_AI`, `CODEX_SANDBOX`,
+`AIDER_AI_CONTEXT`). If no agent is detected, writes to all three so the bundle is available no matter which agent the
+user later switches to. Override with `--agents claude,cursor` etc.
 """
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ _ALL_TARGETS = ("claude", "cursor", "agents-md")
 
 
 def _registry_url(name: str = "") -> str:
-    """API URL for the registry root, or for a single skill bundle when ``name`` is given."""
+    """API URL for the registry root, or for a single skill bundle when `name` is given."""
     path = f"/{name}" if name else ""
     return f"{_REGISTRY_BASE}{path}?ref={_REGISTRY_REF}"
 
@@ -109,7 +109,7 @@ def _download_bundle(name: str) -> dict[str, bytes]:
 
 
 def _parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
-    """Split a Markdown file with YAML frontmatter into ``(metadata, body)``."""
+    """Split a Markdown file with YAML frontmatter into `(metadata, body)`."""
     if not text.startswith("---\n"):
         return {}, text
     end = text.find("\n---\n", 4)

@@ -12,11 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``diffusers-cli schema`` — print the input schema for any pipeline repo.
+"""`diffusers-cli schema` — print the input schema for any pipeline repo.
 
-Tries ``DiffusionPipeline.config_name`` first (so standard repos get their ``__call__`` signature introspected); falls
-back to ``ModularPipelineBlocks.from_pretrained`` for modular repos. No weights are downloaded — only the small index
-file (and any custom block code if ``--trust-remote-code`` is set).
+Tries `DiffusionPipeline.config_name` first (so standard repos get their `__call__` signature introspected); falls back
+to `ModularPipelineBlocks.from_pretrained` for modular repos. No weights are downloaded — only the small index file
+(and any custom block code if `--trust-remote-code` is set).
 """
 
 from __future__ import annotations
@@ -34,9 +34,9 @@ from . import BaseDiffusersCLICommand
 def _schema(args: Namespace) -> None:
     """Print the pipeline's input schema.
 
-    Tries ``DiffusionPipeline.config_name`` (= ``model_index.json``) first; if present, introspects the declared
-    pipeline class's ``__call__`` signature. Otherwise falls back to ``ModularPipelineBlocks.from_pretrained`` and
-    reads the block-declared ``inputs``. No weights downloaded either way.
+    Tries `DiffusionPipeline.config_name` (= `model_index.json`) first; if present, introspects the declared pipeline
+    class's `__call__` signature. Otherwise falls back to `ModularPipelineBlocks.from_pretrained` and reads the
+    block-declared `inputs`. No weights downloaded either way.
     """
     import diffusers
 
@@ -119,9 +119,9 @@ def _schema(args: Namespace) -> None:
 
 
 def _parse_docstring_args(docstring: str | None) -> dict[str, str]:
-    """Extract per-argument descriptions from a Google-style ``Args:`` block.
+    """Extract per-argument descriptions from a Google-style `Args:` block.
 
-    Returns a ``{name: description}`` mapping. Best-effort — unrecognised formats just yield an empty dict rather than
+    Returns a `{name: description}` mapping. Best-effort — unrecognised formats just yield an empty dict rather than
     raising.
     """
     if not docstring:
