@@ -865,6 +865,7 @@ class MellonPipelineConfig:
         """Load a pipeline config from a local path or Hugging Face Hub."""
         cache_dir = kwargs.pop("cache_dir", None)
         local_dir = kwargs.pop("local_dir", None)
+        local_dir_use_symlinks = kwargs.pop("local_dir_use_symlinks", "auto")
         force_download = kwargs.pop("force_download", False)
         proxies = kwargs.pop("proxies", None)
         token = kwargs.pop("token", None)
@@ -893,6 +894,7 @@ class MellonPipelineConfig:
                     revision=revision,
                     subfolder=subfolder,
                     local_dir=local_dir,
+                    local_dir_use_symlinks=local_dir_use_symlinks,
                 )
             except RepositoryNotFoundError:
                 raise EnvironmentError(
