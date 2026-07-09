@@ -42,7 +42,7 @@ logger = logging.get_logger("diffusers-cli/run")
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_OUTPUT_DIR = "outputs"
+DEFAULT_OUTPUT_DIR = str(Path.home() / ".diffusers" / "cli" / "run" / "outputs")
 DTYPE_CHOICES = ("auto", "float16", "fp16", "bfloat16", "bf16", "float32", "fp32")
 CPU_OFFLOAD_CHOICES = ("model", "group")
 
@@ -62,6 +62,11 @@ _IMAGE_INPUT_KEYS = (
 _VIDEO_INPUT_KEYS = (
     "video",
     "control_video",
+)
+_AUDIO_INPUT_KEYS = (
+    "initial_audio_waveforms",
+    "reference_audio",
+    "src_audio",
 )
 
 # Pipeline attribute prefixes that identify a denoiser submodule. Matches base names
@@ -185,7 +190,10 @@ def _add_output_arguments(parser: ArgumentParser) -> None:
         "--output",
         "-o",
         default=None,
-        help="Output file or directory. Defaults to ./outputs/<task>-<index>.<ext>.",
+        help=(
+            "Output file or directory. Defaults to "
+            "~/.diffusers/cli/run/outputs/diffusers-run-<YYYYMMDDTHHMMSS>-<short-uuid>/<task>-<index>.<ext>."
+        ),
     )
     parser.add_argument(
         "--push-to",
@@ -484,11 +492,27 @@ def _parse_pipeline_kwargs(raw: str | None) -> dict[str, Any]:
     return parsed
 
 
-def _resolve_media_inputs(call_kwargs: dict[str, Any]) -> None:
-    """Replace string paths/URLs at known image/video-input keys with loaded media.
+def _load_audio(url_or_path: str) -> tuple[Any, int]:
+    """Load audio from a URL or local path via torchaudio. Returns ``(waveform, sampling_rate)``."""
+    import torchaudio
 
-    Images resolve to a ``PIL.Image.Image`` via ``load_image``; videos resolve to a ``list[PIL.Image.Image]`` via
-    ``load_video``. Values that aren't strings pass through untouched.
+    if url_or_path.startswith(("http://", "https://")):
+        import io
+
+        import httpx
+
+        resp = httpx.get(url_or_path, follow_redirects=True, timeout=30)
+        resp.raise_for_status()
+        return torchaudio.load(io.BytesIO(resp.content))
+    return torchaudio.load(url_or_path)
+
+
+def _resolve_media_inputs(call_kwargs: dict[str, Any]) -> None:
+    """Replace string paths/URLs at known media-input keys with loaded tensors.
+
+    Images resolve to ``PIL.Image.Image`` via ``load_image``; videos to ``list[PIL.Image.Image]`` via ``load_video``;
+    audio to a ``torch.Tensor`` via ``_load_audio`` (also auto-sets the paired sampling-rate kwarg for
+    ``initial_audio_waveforms`` if the user didn't supply it). Non-string values pass through untouched.
     """
     for key in _IMAGE_INPUT_KEYS:
         value = call_kwargs.get(key)
@@ -498,6 +522,13 @@ def _resolve_media_inputs(call_kwargs: dict[str, Any]) -> None:
         value = call_kwargs.get(key)
         if isinstance(value, str):
             call_kwargs[key] = load_video(value)
+    for key in _AUDIO_INPUT_KEYS:
+        value = call_kwargs.get(key)
+        if isinstance(value, str):
+            waveform, sr = _load_audio(value)
+            call_kwargs[key] = waveform
+            if key == "initial_audio_waveforms" and "initial_audio_sampling_rate" not in call_kwargs:
+                call_kwargs["initial_audio_sampling_rate"] = sr
 
 
 def _get_generator(seed: int | None, device: str):
@@ -525,9 +556,26 @@ def _unwrap_pipeline_output(result: Any) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def _default_output_paths(task: str, num: int, explicit: str | None, ext: str) -> list[Path]:
+def _get_or_create_run_id() -> str:
+    """Return the current run's id, creating one if not yet set.
+
+    Format: ``diffusers-run-<YYYYMMDDTHHMMSS>-<6-char-uuid>``. Same id is reused as the local output subdirectory, the
+    remote bucket prefix, and the container-side ``RUN_ID_ENV`` so a run's artifacts are traceable end-to-end.
+    """
+    import uuid
+    from datetime import datetime
+
+    existing = os.environ.get(RUN_ID_ENV)
+    if existing:
+        return existing
+    run_id = f"diffusers-run-{datetime.now().strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:6]}"
+    os.environ[RUN_ID_ENV] = run_id
+    return run_id
+
+
+def _resolve_output_paths(task: str, num: int, explicit: str | None, ext: str) -> list[Path]:
     if explicit is None:
-        base = Path(DEFAULT_OUTPUT_DIR)
+        base = Path(DEFAULT_OUTPUT_DIR) / _get_or_create_run_id()
         base.mkdir(parents=True, exist_ok=True)
         return [base / f"{task}-{i}.{ext}" for i in range(num)]
 
@@ -596,7 +644,7 @@ def _save_audio_arrays(audios, sampling_rate: int, args: Namespace, task: str) -
 
     import numpy as np
 
-    paths = _default_output_paths(task, len(audios), args.output, ext="wav")
+    paths = _resolve_output_paths(task, len(audios), args.output, ext="wav")
     saved: list[str] = []
     for audio, path in zip(audios, paths):
         data = np.asarray(audio)
@@ -625,7 +673,7 @@ def _save_output(value: Any, args: Namespace, task: str) -> list[str]:
     """Save ``value`` by sniffing its runtime type."""
     pil_images = _as_pil_list(value)
     if pil_images is not None:
-        paths = _default_output_paths(task, len(pil_images), args.output, ext="png")
+        paths = _resolve_output_paths(task, len(pil_images), args.output, ext="png")
         for img, path in zip(pil_images, paths):
             img.save(path)
         return [str(p) for p in paths]
@@ -634,7 +682,7 @@ def _save_output(value: Any, args: Namespace, task: str) -> list[str]:
     if frames is not None:
         from diffusers.utils import export_to_video
 
-        path = _default_output_paths(task, 1, args.output, ext="mp4")[0]
+        path = _resolve_output_paths(task, 1, args.output, ext="mp4")[0]
         export_to_video(frames, str(path), fps=args.fps)
         return [str(path)]
 
@@ -642,7 +690,7 @@ def _save_output(value: Any, args: Namespace, task: str) -> list[str]:
     if audios is not None:
         return _save_audio_arrays(audios, args.sampling_rate or 16000, args, task)
 
-    path = _default_output_paths(task, 1, args.output, ext="json")[0]
+    path = _resolve_output_paths(task, 1, args.output, ext="json")[0]
     Path(path).write_text(json.dumps(value, default=str, indent=2))
     return [str(path)]
 
@@ -771,17 +819,19 @@ def _maybe_submit_remote(args: Namespace, task: str) -> bool:
     )
 
     import shlex
-    import uuid
 
     from huggingface_hub import HfApi, get_token, run_job
 
     hf_token = args.token or get_token()
     api = HfApi(token=hf_token)
 
+    # If the user passed --push-to explicitly, treat the bucket as their destination and
+    # skip downloading artifacts locally. Auto-defaulted buckets are internal transport.
+    user_bucket = bool(args.push_to)
     if not args.push_to:
         args.push_to = f"{api.whoami()['name']}/jobs-artifacts"
 
-    run_id = uuid.uuid4().hex[:12]
+    run_id = _get_or_create_run_id()
 
     inputs_mounted = _maybe_upload_local_media(args, api, run_id)
 
@@ -850,7 +900,10 @@ def _maybe_submit_remote(args: Namespace, task: str) -> bool:
     final_status = _wait_for_job(api, job.id, args.namespace, args.poll_interval)
     payload["job_status"] = final_status
     payload["timing"] = _job_timing(api, job.id, args.namespace)
-    payload["outputs"] = _download_job_artifacts(api, args.push_to, run_id, args.output)
+    # Download if the bucket was auto-defaulted (internal transport) OR if the user explicitly
+    # asked for a local path via --output. An explicit --push-to alone stays bucket-only.
+    if not user_bucket or args.output is not None:
+        payload["outputs"] = _download_job_artifacts(api, args.push_to, run_id, args.output)
     out.result(payload["task"], **payload)
     return True
 
@@ -924,7 +977,7 @@ def _download_job_artifacts(api: Any, bucket_id: str, run_id: str, output: str |
     """Download every file under ``<run_id>/`` from ``bucket_id`` into a local directory."""
     from huggingface_hub import BucketFile
 
-    local_dir = Path(output) if output else Path(DEFAULT_OUTPUT_DIR)
+    local_dir = Path(output) if output else Path(DEFAULT_OUTPUT_DIR) / run_id
     local_dir.mkdir(parents=True, exist_ok=True)
 
     pairs: list[tuple[Any, Path]] = []
@@ -1016,6 +1069,8 @@ class RunCommand(BaseDiffusersCLICommand):
 
     def run(self) -> None:
         import diffusers
+
+        _get_or_create_run_id()  # populate RUN_ID_ENV so local output dir + remote bucket prefix agree
 
         try:
             diffusers.DiffusionPipeline.load_config(
