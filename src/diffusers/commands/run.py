@@ -102,6 +102,7 @@ HF_JOBS_KEYS = frozenset(
         "namespace",
         "no_wait",
         "poll_interval",
+        "image",
         "func",
         "format",  # top-level --format is a local rendering flag; never forward to the container
     }
@@ -222,6 +223,15 @@ def _add_remote_arguments(parser: ArgumentParser) -> None:
         "--namespace",
         default=None,
         help="HF namespace to run the --remote job under (defaults to the current user).",
+    )
+    parser.add_argument(
+        "--image",
+        default=None,
+        help=(
+            "Container image for the --remote job (defaults to "
+            f"{_DEFAULT_REMOTE_IMAGE!r}). Must provide torch + CUDA; the CLI installs the "
+            "small Python deps on top via `uv pip install --system`."
+        ),
     )
     parser.add_argument(
         "--no-wait",
@@ -811,7 +821,7 @@ def _maybe_submit_remote(args: Namespace, task: str) -> bool:
         volumes = [Volume(type="bucket", source=args.push_to, mount_path=_INPUTS_MOUNT_ROOT)]
 
     job = run_job(
-        image=_DEFAULT_REMOTE_IMAGE,
+        image=args.image or _DEFAULT_REMOTE_IMAGE,
         command=container_cmd,
         volumes=volumes,
         flavor=args.flavor,
