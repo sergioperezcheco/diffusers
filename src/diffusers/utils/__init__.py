@@ -122,6 +122,7 @@ from .import_utils import (
     is_torch_xla_version,
     is_torchao_available,
     is_torchao_version,
+    is_torchaudio_available,
     is_torchsde_available,
     is_torchvision_available,
     is_transformers_available,
@@ -133,7 +134,7 @@ from .import_utils import (
     is_xformers_version,
     requires_backends,
 )
-from .loading_utils import get_module_from_name, get_submodule_by_name, load_image, load_video
+from .loading_utils import get_module_from_name, get_submodule_by_name, load_audio, load_image, load_video
 from .logging import get_logger
 from .outputs import BaseOutput
 from .peft_utils import (

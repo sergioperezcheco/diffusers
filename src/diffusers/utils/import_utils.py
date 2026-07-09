@@ -209,6 +209,7 @@ _outlines_available, _outlines_version = _is_package_available("outlines")
 _torchsde_available, _torchsde_version = _is_package_available("torchsde")
 _peft_available, _peft_version = _is_package_available("peft")
 _torchvision_available, _torchvision_version = _is_package_available("torchvision")
+_torchaudio_available, _torchaudio_version = _is_package_available("torchaudio")
 _matplotlib_available, _matplotlib_version = _is_package_available("matplotlib")
 _timm_available, _timm_version = _is_package_available("timm")
 _bitsandbytes_available, _bitsandbytes_version = _is_package_available("bitsandbytes")
@@ -383,6 +384,10 @@ def is_outlines_available():
 
 def is_imageio_available():
     return _imageio_available
+
+
+def is_torchaudio_available():
+    return _torchaudio_available
 
 
 def is_gguf_available():
@@ -585,6 +590,11 @@ IMAGEIO_IMPORT_ERROR = """
 """
 
 # docstyle-ignore
+TORCHAUDIO_IMPORT_ERROR = """
+{0} requires the torchaudio library but it was not found in your environment. You can install it with pip: `pip install torchaudio`
+"""
+
+# docstyle-ignore
 GGUF_IMPORT_ERROR = """
 {0} requires the gguf library but it was not found in your environment. You can install it with pip: `pip install gguf`
 """
@@ -644,6 +654,7 @@ BACKENDS_MAPPING = OrderedDict(
         ("bitsandbytes", (is_bitsandbytes_available, BITSANDBYTES_IMPORT_ERROR)),
         ("sentencepiece", (is_sentencepiece_available, SENTENCEPIECE_IMPORT_ERROR)),
         ("imageio", (is_imageio_available, IMAGEIO_IMPORT_ERROR)),
+        ("torchaudio", (is_torchaudio_available, TORCHAUDIO_IMPORT_ERROR)),
         ("gguf", (is_gguf_available, GGUF_IMPORT_ERROR)),
         ("torchao", (is_torchao_available, TORCHAO_IMPORT_ERROR)),
         ("quanto", (is_optimum_quanto_available, QUANTO_IMPORT_ERROR)),

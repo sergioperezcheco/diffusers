@@ -1,6 +1,6 @@
 import os
 import tempfile
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 from urllib.parse import unquote, urlparse
 
 import PIL.Image
@@ -8,7 +8,11 @@ import PIL.ImageOps
 import requests
 
 from .constants import DIFFUSERS_REQUEST_TIMEOUT
-from .import_utils import BACKENDS_MAPPING, is_imageio_available
+from .import_utils import BACKENDS_MAPPING, is_imageio_available, is_torchaudio_available
+
+
+if TYPE_CHECKING:
+    import torch
 
 
 def load_image(
@@ -136,6 +140,60 @@ def load_video(
         pil_images = convert_method(pil_images)
 
     return pil_images
+
+
+def load_audio(audio: str) -> tuple["torch.Tensor", int]:
+    """
+    Loads `audio` to a torch tensor.
+
+    Args:
+        audio (`str`):
+            A URL or Path to an audio file.
+
+    Returns:
+        `tuple[torch.Tensor, int]`:
+            The audio as a waveform tensor of shape `(channels, num_frames)` and its sample rate.
+    """
+    if not is_torchaudio_available():
+        raise ImportError(BACKENDS_MAPPING["torchaudio"][1].format("load_audio"))
+
+    import torchaudio
+
+    is_url = audio.startswith("http://") or audio.startswith("https://")
+    is_file = os.path.isfile(audio)
+    was_tempfile_created = False
+
+    if not (is_url or is_file):
+        raise ValueError(
+            f"Incorrect path or URL. URLs must start with `http://` or `https://`, and {audio} is not a valid path."
+        )
+
+    if is_url:
+        response = requests.get(audio, stream=True, timeout=DIFFUSERS_REQUEST_TIMEOUT)
+        if response.status_code != 200:
+            raise ValueError(f"Failed to download audio. Status code: {response.status_code}")
+
+        parsed_url = urlparse(audio)
+        file_name = os.path.basename(unquote(parsed_url.path))
+
+        suffix = os.path.splitext(file_name)[1] or ".wav"
+        audio_path = tempfile.NamedTemporaryFile(suffix=suffix, delete=False).name
+
+        was_tempfile_created = True
+
+        audio_data = response.iter_content(chunk_size=8192)
+        with open(audio_path, "wb") as f:
+            for chunk in audio_data:
+                f.write(chunk)
+
+        audio = audio_path
+
+    waveform, sample_rate = torchaudio.load(audio)
+
+    if was_tempfile_created:
+        os.remove(audio_path)
+
+    return waveform, sample_rate
 
 
 # Taken from `transformers`.
