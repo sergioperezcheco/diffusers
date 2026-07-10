@@ -596,6 +596,27 @@ class ModularPipelineBlocks(ConfigMixin, PushToHubMixin):
             expected_configs=self.expected_configs,
         )
 
+    def __call__(self, components, state: PipelineState) -> PipelineState:
+        raise NotImplementedError(f"`__call__` method must be implemented in {self.__class__.__name__}")
+
+
+class ModularLoopPipelineBlocks(ModularPipelineBlocks):
+    """
+    Base class for leaf blocks that run inside an [`IterativePipelineBlocks`] loop.
+
+    The only difference from [`ModularPipelineBlocks`] is the `__call__` contract: in addition to
+    `(components, state)`, the block accepts the enclosing loop's variables as call arguments — its signature
+    must name exactly the loop's `loop_variables` (e.g. `def __call__(self, components, state, i, t)`), which
+    the loop validates before the first iteration.
+
+    > [!WARNING] > This is an experimental feature and is likely to change in the future.
+    """
+
+    def __call__(self, components, state: PipelineState, **kwargs) -> PipelineState:
+        # Subclasses name the enclosing loop's variables explicitly, e.g.
+        # `def __call__(self, components, state, i, t)`.
+        raise NotImplementedError(f"`__call__` method must be implemented in {self.__class__.__name__}")
+
 
 class ConditionalPipelineBlocks(ModularPipelineBlocks):
     """
@@ -1335,7 +1356,8 @@ class IterativePipelineBlocks(SequentialPipelineBlocks):
 
     Unlike [`LoopSequentialPipelineBlocks`], sub-blocks operate on the full [`PipelineState`] with the regular
     `get_block_state`/`set_block_state` behavior, so an `IterativePipelineBlocks` can itself be a sub-block of
-    another one — loops can be nested and composed freely.
+    another one — loops can be nested and composed freely. Sub-blocks must be [`ModularLoopPipelineBlocks`]
+    (loop steps) or nested `IterativePipelineBlocks`, which is validated at construction.
 
     Loop variables are passed to sub-blocks as call arguments: every sub-block must have the signature
     `__call__(self, components, state, <loop_variables...>)`, which is validated against `loop_variables` before
@@ -1418,6 +1440,20 @@ class IterativePipelineBlocks(SequentialPipelineBlocks):
                 expected_configs.append(config)
         return expected_configs
 
+    def __init__(self):
+        super().__init__()
+        self._validate_sub_block_types()
+
+    def _validate_sub_block_types(self):
+        """Sub-blocks must be loop steps (`ModularLoopPipelineBlocks`) or nested loops (`IterativePipelineBlocks`)."""
+        for block_name, block in self.sub_blocks.items():
+            if not isinstance(block, (ModularLoopPipelineBlocks, IterativePipelineBlocks)):
+                raise ValueError(
+                    f"Sub-block '{block_name}' ({block.__class__.__name__}) of {self.__class__.__name__} must be "
+                    "a `ModularLoopPipelineBlocks` (a loop step) or an `IterativePipelineBlocks` (a nested loop); "
+                    f"got `{block.__class__.__bases__[0].__name__}`."
+                )
+
     def _validate_loop_step_signatures(self):
         """Every sub-block must accept exactly the loop variables after `(components, state)`."""
         expected = set(self.loop_variables)
@@ -1434,6 +1470,8 @@ class IterativePipelineBlocks(SequentialPipelineBlocks):
     def loop_step(self, components, state: PipelineState, **loop_kwargs) -> PipelineState:
         """Run all sub-blocks once over the pipeline state (one loop iteration), passing the loop variables."""
         if not getattr(self, "_loop_signatures_validated", False):
+            # re-validate types here to cover sub_blocks assigned after __init__ (e.g. from_blocks_dict)
+            self._validate_sub_block_types()
             self._validate_loop_step_signatures()
             self._loop_signatures_validated = True
 

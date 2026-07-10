@@ -19,6 +19,7 @@ import torch
 from diffusers.modular_pipelines import (
     InputParam,
     IterativePipelineBlocks,
+    ModularLoopPipelineBlocks,
     ModularPipelineBlocks,
     OutputParam,
     SequentialPipelineBlocks,
@@ -31,7 +32,7 @@ from diffusers.modular_pipelines import (
 # arguments; every leaf sub-block of a loop must accept its loop's variables.
 
 
-class ChunkNoiseGenStep(ModularPipelineBlocks):
+class ChunkNoiseGenStep(ModularLoopPipelineBlocks):
     model_name = "test"
 
     @property
@@ -53,7 +54,7 @@ class ChunkNoiseGenStep(ModularPipelineBlocks):
         return components, state
 
 
-class LoopDenoiserStep(ModularPipelineBlocks):
+class LoopDenoiserStep(ModularLoopPipelineBlocks):
     model_name = "test"
 
     @property
@@ -75,7 +76,7 @@ class LoopDenoiserStep(ModularPipelineBlocks):
         return components, state
 
 
-class LoopSchedulerStep(ModularPipelineBlocks):
+class LoopSchedulerStep(ModularLoopPipelineBlocks):
     model_name = "test"
 
     @property
@@ -128,7 +129,7 @@ class InnerDenoiseLoop(IterativePipelineBlocks):
         return components, state
 
 
-class ChunkUpdateStep(ModularPipelineBlocks):
+class ChunkUpdateStep(ModularLoopPipelineBlocks):
     model_name = "test"
 
     @property
@@ -231,25 +232,50 @@ class TestIterativePipelineBlocksExecution:
         # declared sub-block outputs persist after the loop (last iteration's value)
         assert state.get("noise_pred") is not None
 
-    def test_leaf_signature_is_validated(self):
+    def test_sub_block_type_is_validated(self):
+        # a regular ModularPipelineBlocks cannot be a loop sub-block: fails at construction
         class PlainStep(ModularPipelineBlocks):
             model_name = "test"
 
             @property
             def description(self):
-                return "regular block without the loop variables"
+                return "regular block, not a loop step"
 
             def __call__(self, components, state):
                 return components, state
 
-        class BadLoop(IterativePipelineBlocks):
+        class BadTypeLoop(IterativePipelineBlocks):
             model_name = "test"
             block_classes = [PlainStep]
             block_names = ["plain"]
 
             @property
             def description(self):
-                return "loop with a mismatched leaf signature"
+                return "loop with a non-loop sub-block"
+
+        with pytest.raises(ValueError, match="must be a `ModularLoopPipelineBlocks`"):
+            BadTypeLoop()
+
+    def test_leaf_signature_is_validated(self):
+        # a loop step whose signature doesn't match the loop's variables fails before the first iteration
+        class WrongSigStep(ModularLoopPipelineBlocks):
+            model_name = "test"
+
+            @property
+            def description(self):
+                return "loop step with the wrong loop variables"
+
+            def __call__(self, components, state, k):
+                return components, state
+
+        class BadSigLoop(IterativePipelineBlocks):
+            model_name = "test"
+            block_classes = [WrongSigStep]
+            block_names = ["wrong"]
+
+            @property
+            def description(self):
+                return "loop whose sub-block names the wrong loop variables"
 
             @property
             def loop_variables(self):
@@ -266,7 +292,7 @@ class TestIterativePipelineBlocksExecution:
                     components, state = self.loop_step(components, state, i=i, t=t)
                 return components, state
 
-        pipe = SequentialPipelineBlocks.from_blocks_dict({"loop": BadLoop()}).init_pipeline()
+        pipe = SequentialPipelineBlocks.from_blocks_dict({"loop": BadSigLoop()}).init_pipeline()
         with pytest.raises(ValueError, match="must accept the loop variables"):
             pipe(timesteps=torch.tensor([1.0]))
 

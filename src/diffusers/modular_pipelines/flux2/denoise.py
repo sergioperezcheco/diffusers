@@ -23,7 +23,7 @@ from ...schedulers import FlowMatchEulerDiscreteScheduler
 from ...utils import is_torch_xla_available, logging
 from ..modular_pipeline import (
     IterativePipelineBlocks,
-    ModularPipelineBlocks,
+    ModularLoopPipelineBlocks,
     PipelineState,
 )
 from ..modular_pipeline_utils import ComponentSpec, ConfigSpec, InputParam, OutputParam
@@ -41,7 +41,7 @@ else:
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 
-class Flux2LoopDenoiser(ModularPipelineBlocks):
+class Flux2LoopDenoiser(ModularLoopPipelineBlocks):
     model_name = "flux2"
 
     @property
@@ -143,7 +143,7 @@ class Flux2LoopDenoiser(ModularPipelineBlocks):
 
 
 # same as Flux2LoopDenoiser but guidance=None
-class Flux2KleinLoopDenoiser(ModularPipelineBlocks):
+class Flux2KleinLoopDenoiser(ModularLoopPipelineBlocks):
     model_name = "flux2-klein"
 
     @property
@@ -239,7 +239,7 @@ class Flux2KleinLoopDenoiser(ModularPipelineBlocks):
 
 
 # support CFG for Flux2-Klein base model
-class Flux2KleinBaseLoopDenoiser(ModularPipelineBlocks):
+class Flux2KleinBaseLoopDenoiser(ModularLoopPipelineBlocks):
     model_name = "flux2-klein"
 
     @property
@@ -386,7 +386,7 @@ class Flux2KleinBaseLoopDenoiser(ModularPipelineBlocks):
         return components, state
 
 
-class Flux2LoopAfterDenoiser(ModularPipelineBlocks):
+class Flux2LoopAfterDenoiser(ModularLoopPipelineBlocks):
     model_name = "flux2"
 
     @property
