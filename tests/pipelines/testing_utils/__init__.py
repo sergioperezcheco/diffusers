@@ -7,7 +7,6 @@ from .cache import (
     TaylorSeerCacheTesterMixin,
 )
 from .common import BasePipelineTesterConfig, PipelineTesterMixin
-from .ip_adapter import FluxIPAdapterTesterMixin
 from .memory import (
     GroupOffloadTesterMixin,
     LayerwiseCastingTesterMixin,
@@ -35,7 +34,6 @@ __all__ = [
     "FirstBlockCacheTesterMixin",
     "TaylorSeerCacheTesterMixin",
     "MagCacheTesterMixin",
-    "FluxIPAdapterTesterMixin",
     "check_qkv_fused_layers_exist",
     "check_qkv_fusion_matches_attn_procs_length",
     "check_qkv_fusion_processors_exist",
