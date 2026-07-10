@@ -1340,8 +1340,23 @@ class IterativePipelineBlocks(SequentialPipelineBlocks):
     Loop variables are passed to sub-blocks as call arguments: every sub-block must have the signature
     `__call__(self, components, state, <loop_variables...>)`, which is validated against `loop_variables` before
     the first iteration. A nested loop accepts the outer loop's variables in its own hand-written `__call__`
-    (ignoring or forwarding them) and passes its own `loop_variables` to its own sub-blocks. Sub-block outputs
-    are written to the pipeline state as usual and persist after the loop.
+    (ignoring or forwarding them) and passes its own `loop_variables` to its own sub-blocks:
+
+    ```python
+    class InnerDenoiseLoop(IterativePipelineBlocks):
+        @property
+        def loop_variables(self):
+            return ["i", "t"]                          # what it passes to ITS sub-blocks
+
+        @torch.no_grad()
+        def __call__(self, components, state, k):      # accepts the OUTER chunk loop's variable
+            block_state = self.get_block_state(state)
+            for i, t in enumerate(block_state.timesteps):
+                components, state = self.loop_step(components, state, i=i, t=t)
+            return components, state
+    ```
+
+    Sub-block outputs are written to the pipeline state as usual and persist after the loop.
 
     > [!WARNING] > This is an experimental feature and is likely to change in the future.
 
@@ -1435,7 +1450,10 @@ class IterativePipelineBlocks(SequentialPipelineBlocks):
                 raise
         return components, state
 
-    def __call__(self, components, state: PipelineState) -> PipelineState:
+    def __call__(self, components, state: PipelineState, **kwargs) -> PipelineState:
+        # Subclasses implement their loop logic here. When the loop is nested inside another
+        # IterativePipelineBlocks, the signature must also accept the outer loop's variables,
+        # e.g. `def __call__(self, components, state, k)`.
         raise NotImplementedError("`__call__` method needs to be implemented by the subclass")
 
 
