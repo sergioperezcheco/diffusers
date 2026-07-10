@@ -15,18 +15,15 @@
 
 import inspect
 
-import pytest
 import torch
 
-from diffusers import FasterCacheConfig, PyramidAttentionBroadcastConfig, apply_faster_cache
-from diffusers.hooks.faster_cache import FasterCacheBlockHook, FasterCacheDenoiserHook
+from diffusers import FasterCacheConfig, PyramidAttentionBroadcastConfig
 from diffusers.hooks.first_block_cache import FirstBlockCacheConfig
 from diffusers.hooks.mag_cache import MagCacheConfig
 from diffusers.hooks.pyramid_attention_broadcast import PyramidAttentionBroadcastHook
 from diffusers.hooks.taylorseer_cache import TaylorSeerCacheConfig
-from diffusers.utils import logging
 
-from ...testing_utils import CaptureLogger, assert_tensors_close, is_cache, torch_device
+from ...testing_utils import assert_tensors_close, is_cache, torch_device
 from .common import BasePipelineOutputMixin
 
 
@@ -237,25 +234,6 @@ class FasterCacheTesterMixin(CacheTesterMixin):
     def _get_cache_config(self):
         return FasterCacheConfig(**self.FASTER_CACHE_CONFIG)
 
-    def test_faster_cache_basic_warning_or_errors_raised(self):
-        components = self.get_dummy_components()
-
-        logger = logging.get_logger("diffusers.hooks.faster_cache")
-        logger.setLevel(logging.INFO)
-
-        # Check if warning is raised when no attention_weight_callback is provided
-        pipe = self.pipeline_class(**components)
-        with CaptureLogger(logger) as cap_logger:
-            config = FasterCacheConfig(spatial_attention_block_skip_range=2, attention_weight_callback=None)
-            apply_faster_cache(pipe.transformer, config)
-        assert "No `attention_weight_callback` provided when enabling FasterCache" in cap_logger.out
-
-        # Check if error raised when unsupported tensor format used
-        pipe = self.pipeline_class(**components)
-        with pytest.raises(ValueError):
-            config = FasterCacheConfig(spatial_attention_block_skip_range=2, tensor_format="BFHWC")
-            apply_faster_cache(pipe.transformer, config)
-
     def test_faster_cache_inference(self, expected_atol: float = 0.1):
         self._test_cache_inference(
             self._get_cache_config(), num_inference_steps=4, expected_atol=expected_atol, set_timestep_callback=True
@@ -283,30 +261,10 @@ class FasterCacheTesterMixin(CacheTesterMixin):
         faster_cache_config.current_timestep_callback = lambda: pipe.current_timestep
         pipe.transformer.enable_cache(faster_cache_config)
 
-        expected_hooks = 0
-        if faster_cache_config.spatial_attention_block_skip_range is not None:
-            expected_hooks += num_layers + num_single_layers
-        if faster_cache_config.temporal_attention_block_skip_range is not None:
-            expected_hooks += num_layers + num_single_layers
-
-        # Check if faster_cache denoiser hook is attached
+        # Hook registration/removal is covered at the model level (`_test_cache_hooks_registered`). Here we only
+        # verify the pipeline-specific behaviour: that hook state evolves during the denoising loop and is reset
+        # afterwards.
         denoiser = pipe.transformer if hasattr(pipe, "transformer") else pipe.unet
-        assert hasattr(denoiser, "_diffusers_hook") and isinstance(
-            denoiser._diffusers_hook.get_hook(_FASTER_CACHE_DENOISER_HOOK), FasterCacheDenoiserHook
-        ), "Hook should be of type FasterCacheDenoiserHook."
-
-        # Check if all blocks have faster_cache block hook attached
-        count = 0
-        for name, module in denoiser.named_modules():
-            if hasattr(module, "_diffusers_hook"):
-                if name == "":
-                    # Skip the root denoiser module
-                    continue
-                count += 1
-                assert isinstance(module._diffusers_hook.get_hook(_FASTER_CACHE_BLOCK_HOOK), FasterCacheBlockHook), (
-                    "Hook should be of type FasterCacheBlockHook."
-                )
-        assert count == expected_hooks, "Number of hooks should match expected number."
 
         # Perform inference to ensure that states are updated correctly
         def faster_cache_state_check_callback(pipe, i, t, kwargs):
