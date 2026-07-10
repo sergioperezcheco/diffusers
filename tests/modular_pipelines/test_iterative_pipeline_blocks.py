@@ -118,8 +118,8 @@ class InnerDenoiseLoop(IterativePipelineBlocks):
         return ["i", "t"]
 
     @property
-    def loop_inputs(self):
-        return [InputParam(name="timesteps", required=True)]
+    def inputs(self):
+        return [InputParam(name="timesteps", required=True), *super().inputs]
 
     @torch.no_grad()
     def __call__(self, components, state, k):
@@ -168,8 +168,8 @@ class ChunkLoop(IterativePipelineBlocks):
         return ["k"]
 
     @property
-    def loop_inputs(self):
-        return [InputParam(name="num_latent_chunk", required=True)]
+    def inputs(self):
+        return [InputParam(name="num_latent_chunk", required=True), *super().inputs]
 
     @torch.no_grad()
     def __call__(self, components, state):
@@ -180,11 +180,11 @@ class ChunkLoop(IterativePipelineBlocks):
 
 
 class TestIterativePipelineBlocksStructure:
-    def test_loop_inputs_aggregation(self):
+    def test_inputs_aggregation(self):
         loop = ChunkLoop()
         input_names = [p.name for p in loop.inputs]
 
-        # loop_inputs of the loop itself and of the nested loop are surfaced
+        # inputs of the loop logic itself and of the nested loop are surfaced
         assert "num_latent_chunk" in input_names
         assert "timesteps" in input_names
         # loop variables are call arguments, not inputs
@@ -257,7 +257,7 @@ class TestIterativePipelineBlocksExecution:
             BadTypeLoop()
 
     def test_leaf_signature_is_validated(self):
-        # a loop step whose signature doesn't match the loop's variables fails before the first iteration
+        # a loop step whose signature doesn't match the loop's variables fails at construction
         class WrongSigStep(ModularLoopPipelineBlocks):
             model_name = "test"
 
@@ -282,8 +282,8 @@ class TestIterativePipelineBlocksExecution:
                 return ["i", "t"]
 
             @property
-            def loop_inputs(self):
-                return [InputParam(name="timesteps", required=True)]
+            def inputs(self):
+                return [InputParam(name="timesteps", required=True), *super().inputs]
 
             @torch.no_grad()
             def __call__(self, components, state):
@@ -292,9 +292,8 @@ class TestIterativePipelineBlocksExecution:
                     components, state = self.loop_step(components, state, i=i, t=t)
                 return components, state
 
-        pipe = SequentialPipelineBlocks.from_blocks_dict({"loop": BadSigLoop()}).init_pipeline()
         with pytest.raises(ValueError, match="must accept the loop variables"):
-            pipe(timesteps=torch.tensor([1.0]))
+            BadSigLoop()
 
     def test_loop_leaf_standalone_raises(self):
         # outside a loop, a leaf block with loop variables in its signature cannot run

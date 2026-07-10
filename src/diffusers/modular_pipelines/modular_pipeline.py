@@ -1360,8 +1360,8 @@ class IterativePipelineBlocks(SequentialPipelineBlocks):
     (loop steps) or nested `IterativePipelineBlocks`, which is validated at construction.
 
     Loop variables are passed to sub-blocks as call arguments: every sub-block must have the signature
-    `__call__(self, components, state, <loop_variables...>)`, which is validated against `loop_variables` before
-    the first iteration. A nested loop accepts the outer loop's variables in its own hand-written `__call__`
+    `__call__(self, components, state, <loop_variables...>)`, which is validated against `loop_variables` at
+    construction. A nested loop accepts the outer loop's variables in its own hand-written `__call__`
     (ignoring or forwarding them) and passes its own `loop_variables` to its own sub-blocks:
 
     ```python
@@ -1378,7 +1378,9 @@ class IterativePipelineBlocks(SequentialPipelineBlocks):
             return components, state
     ```
 
-    Sub-block outputs are written to the pipeline state as usual and persist after the loop.
+    Sub-block outputs are written to the pipeline state as usual and persist after the loop. If the loop logic in
+    `__call__` itself consumes inputs (e.g. `timesteps`) or uses components (e.g. the scheduler) beyond what the
+    sub-blocks declare, override the aggregated `inputs` / `expected_components` / ... properties to add them.
 
     > [!WARNING] > This is an experimental feature and is likely to change in the future.
 
@@ -1392,60 +1394,21 @@ class IterativePipelineBlocks(SequentialPipelineBlocks):
         """Names of the loop variables `loop_step` passes to leaf sub-blocks each iteration (e.g. `["i", "t"]`)."""
         return []
 
-    @property
-    def loop_inputs(self) -> list[InputParam]:
-        """Inputs consumed by the loop logic in `__call__` itself (e.g. `timesteps`)."""
-        return []
-
-    @property
-    def loop_intermediate_outputs(self) -> list[OutputParam]:
-        """Outputs written to the pipeline state by the loop logic in `__call__` itself."""
-        return []
-
-    @property
-    def loop_expected_components(self) -> list[ComponentSpec]:
-        """Components used by the loop logic in `__call__` itself (e.g. the scheduler)."""
-        return []
-
-    @property
-    def loop_expected_configs(self) -> list[ConfigSpec]:
-        """Configs used by the loop logic in `__call__` itself."""
-        return []
-
-    @property
-    def inputs(self) -> list[InputParam]:
-        inputs = self._get_inputs()
-        names = {p.name for p in inputs}
-        return [p for p in self.loop_inputs if p.name not in names] + inputs
-
-    @property
-    def intermediate_outputs(self) -> list[OutputParam]:
-        outputs = super().intermediate_outputs
-        names = {output.name for output in outputs}
-        return outputs + [output for output in self.loop_intermediate_outputs if output.name not in names]
-
-    @property
-    def expected_components(self) -> list[ComponentSpec]:
-        expected_components = super().expected_components
-        for component in self.loop_expected_components:
-            if component not in expected_components:
-                expected_components.append(component)
-        return expected_components
-
-    @property
-    def expected_configs(self) -> list[ConfigSpec]:
-        expected_configs = super().expected_configs
-        for config in self.loop_expected_configs:
-            if config not in expected_configs:
-                expected_configs.append(config)
-        return expected_configs
-
     def __init__(self):
         super().__init__()
-        self._validate_sub_block_types()
+        self._validate_sub_blocks()
 
-    def _validate_sub_block_types(self):
-        """Sub-blocks must be loop steps (`ModularLoopPipelineBlocks`) or nested loops (`IterativePipelineBlocks`)."""
+    @classmethod
+    def from_blocks_dict(cls, blocks_dict, description: str | None = None) -> "IterativePipelineBlocks":
+        instance = super().from_blocks_dict(blocks_dict, description)
+        # sub_blocks are assigned after __init__ on this path, so validate again
+        instance._validate_sub_blocks()
+        return instance
+
+    def _validate_sub_blocks(self):
+        """Sub-blocks must be loop steps (`ModularLoopPipelineBlocks`) or nested loops (`IterativePipelineBlocks`)
+        and accept exactly the loop variables after `(components, state)`."""
+        expected = set(self.loop_variables)
         for block_name, block in self.sub_blocks.items():
             if not isinstance(block, (ModularLoopPipelineBlocks, IterativePipelineBlocks)):
                 raise ValueError(
@@ -1453,11 +1416,6 @@ class IterativePipelineBlocks(SequentialPipelineBlocks):
                     "a `ModularLoopPipelineBlocks` (a loop step) or an `IterativePipelineBlocks` (a nested loop); "
                     f"got `{block.__class__.__bases__[0].__name__}`."
                 )
-
-    def _validate_loop_step_signatures(self):
-        """Every sub-block must accept exactly the loop variables after `(components, state)`."""
-        expected = set(self.loop_variables)
-        for block_name, block in self.sub_blocks.items():
             params = list(inspect.signature(block.__call__).parameters)
             extra = set(params[2:])
             if extra != expected:
@@ -1469,12 +1427,6 @@ class IterativePipelineBlocks(SequentialPipelineBlocks):
 
     def loop_step(self, components, state: PipelineState, **loop_kwargs) -> PipelineState:
         """Run all sub-blocks once over the pipeline state (one loop iteration), passing the loop variables."""
-        if not getattr(self, "_loop_signatures_validated", False):
-            # re-validate types here to cover sub_blocks assigned after __init__ (e.g. from_blocks_dict)
-            self._validate_sub_block_types()
-            self._validate_loop_step_signatures()
-            self._loop_signatures_validated = True
-
         for block_name, block in self.sub_blocks.items():
             try:
                 components, state = block(components, state, **loop_kwargs)

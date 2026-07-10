@@ -451,9 +451,13 @@ class Flux2DenoiseLoopWrapper(IterativePipelineBlocks):
         return ["i", "t"]
 
     @property
-    def loop_expected_components(self) -> list[ComponentSpec]:
+    def expected_components(self) -> list[ComponentSpec]:
+        expected_components = super().expected_components
         # the loop logic itself reads `scheduler.order` for the warmup-step computation
-        return [ComponentSpec("scheduler", FlowMatchEulerDiscreteScheduler)]
+        scheduler = ComponentSpec("scheduler", FlowMatchEulerDiscreteScheduler)
+        if scheduler not in expected_components:
+            expected_components.append(scheduler)
+        return expected_components
 
     @property
     def description(self) -> str:
@@ -463,8 +467,11 @@ class Flux2DenoiseLoopWrapper(IterativePipelineBlocks):
         )
 
     @property
-    def loop_inputs(self) -> list[InputParam]:
-        return [
+    def inputs(self) -> list[InputParam]:
+        inputs = super().inputs
+        names = {param.name for param in inputs}
+        # inputs consumed by the loop logic itself, on top of what the sub-blocks declare
+        loop_inputs = [
             InputParam(
                 "timesteps",
                 required=True,
@@ -478,6 +485,7 @@ class Flux2DenoiseLoopWrapper(IterativePipelineBlocks):
                 description="The number of inference steps to use for the denoising process.",
             ),
         ]
+        return [param for param in loop_inputs if param.name not in names] + inputs
 
     @torch.no_grad()
     def __call__(self, components: Flux2ModularPipeline, state: PipelineState) -> PipelineState:
