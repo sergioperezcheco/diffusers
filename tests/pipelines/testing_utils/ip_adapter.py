@@ -85,7 +85,9 @@ class FluxIPAdapterTesterMixin:
 
         # 1. Single IP-Adapter test cases
         adapter_state_dict = create_flux_ip_adapter_state_dict(pipe.transformer)
-        pipe.transformer._load_ip_adapter_weights(adapter_state_dict)
+        # Load through the pipeline's public IP-Adapter API. `image_encoder_pretrained_model_name_or_path=None`
+        # skips fetching a CLIP image encoder since we feed pre-computed `ip_adapter_image_embeds` directly.
+        pipe.load_ip_adapter(adapter_state_dict, weight_name="", image_encoder_pretrained_model_name_or_path=None)
 
         # forward pass with single ip adapter, but scale=0 which should have no effect
         inputs = self._modify_inputs_for_ip_adapter_test(self.get_dummy_inputs())
@@ -117,7 +119,11 @@ class FluxIPAdapterTesterMixin:
         # 2. Multi IP-Adapter test cases
         adapter_state_dict_1 = create_flux_ip_adapter_state_dict(pipe.transformer)
         adapter_state_dict_2 = create_flux_ip_adapter_state_dict(pipe.transformer)
-        pipe.transformer._load_ip_adapter_weights([adapter_state_dict_1, adapter_state_dict_2])
+        pipe.load_ip_adapter(
+            [adapter_state_dict_1, adapter_state_dict_2],
+            weight_name=["", ""],
+            image_encoder_pretrained_model_name_or_path=None,
+        )
 
         # forward pass with multi ip adapter, but scale=0 which should have no effect
         inputs = self._modify_inputs_for_ip_adapter_test(self.get_dummy_inputs())
