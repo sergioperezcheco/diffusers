@@ -26,7 +26,8 @@ from diffusers.hooks.pyramid_attention_broadcast import PyramidAttentionBroadcas
 from diffusers.hooks.taylorseer_cache import TaylorSeerCacheConfig
 from diffusers.utils import logging
 
-from ...testing_utils import CaptureLogger, assert_tensors_close, is_cache
+from ...testing_utils import CaptureLogger, assert_tensors_close, is_cache, torch_device
+from .common import BasePipelineOutputMixin
 
 
 class CacheTesterMixin:
@@ -93,7 +94,7 @@ class CacheTesterMixin:
 
 
 @is_cache
-class PyramidAttentionBroadcastTesterMixin(CacheTesterMixin):
+class PyramidAttentionBroadcastTesterMixin(CacheTesterMixin, BasePipelineOutputMixin):
     PAB_CONFIG = {
         "spatial_attention_block_skip_range": 2,
         "spatial_attention_timestep_skip_range": (100, 800),
@@ -171,26 +172,22 @@ class PyramidAttentionBroadcastTesterMixin(CacheTesterMixin):
                 assert hook.state.cache is None, "Cache should be reset to None after inference."
                 assert hook.state.iteration == 0, "Iteration should be reset to 0 after inference."
 
-    def test_pyramid_attention_broadcast_inference(self, expected_atol: float = 0.2):
+    def test_pyramid_attention_broadcast_inference(self, base_pipe_output, expected_atol: float = 0.2):
         # We need to use higher tolerance because we are using a random model. With a converged/trained model, the
-        # tolerance can be lower.
-        device = "cpu"  # ensure determinism for the device-dependent torch.Generator
-        num_layers = 2
-        components = self.get_dummy_components(num_layers=num_layers)
+        # tolerance can be lower. The no-PAB reference is the shared, class-cached `base_pipe_output`, so the PAB
+        # runs below reuse the same components/inputs the fixture does (default `get_dummy_components()` and
+        # `get_dummy_inputs()`) and reseed the global RNG before each forward, so the disabled run reproduces the
+        # reference and the only remaining differences come from PAB itself.
+        components = self.get_dummy_components()
+        for key in components:
+            if "text_encoder" in key and hasattr(components[key], "eval"):
+                components[key].eval()
         pipe = self.pipeline_class(**components)
-        pipe = pipe.to(device)
+        pipe.to(torch_device)
         pipe.set_progress_bar_config(disable=None)
 
-        # The same pipe is reused across all three passes, so reseed the global RNG before each forward. This
-        # keeps every source of randomness (including any text-encoder dropout) identical across passes, so the
-        # only differences come from PAB itself.
-
-        # Run inference without PAB
-        torch.manual_seed(0)
-        inputs = self.get_dummy_inputs()
-        inputs["num_inference_steps"] = 4
-        output = pipe(**inputs)[0]
-        original_image_slice = output.flatten()
+        # Reference (no PAB) output, computed once per test class by the `base_pipe_output` fixture.
+        original_image_slice = base_pipe_output.flatten()
         original_image_slice = torch.cat((original_image_slice[:8], original_image_slice[-8:]))
 
         # Run inference with PAB enabled
@@ -200,19 +197,15 @@ class PyramidAttentionBroadcastTesterMixin(CacheTesterMixin):
         denoiser.enable_cache(pab_config)
 
         torch.manual_seed(0)
-        inputs = self.get_dummy_inputs()
-        inputs["num_inference_steps"] = 4
-        output = pipe(**inputs)[0]
+        output = pipe(**self.get_dummy_inputs())[0]
         image_slice_pab_enabled = output.flatten()
         image_slice_pab_enabled = torch.cat((image_slice_pab_enabled[:8], image_slice_pab_enabled[-8:]))
 
-        # Run inference with PAB disabled
+        # Run inference with PAB disabled — should reproduce the reference output
         denoiser.disable_cache()
 
         torch.manual_seed(0)
-        inputs = self.get_dummy_inputs()
-        inputs["num_inference_steps"] = 4
-        output = pipe(**inputs)[0]
+        output = pipe(**self.get_dummy_inputs())[0]
         image_slice_pab_disabled = output.flatten()
         image_slice_pab_disabled = torch.cat((image_slice_pab_disabled[:8], image_slice_pab_disabled[-8:]))
 
