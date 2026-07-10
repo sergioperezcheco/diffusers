@@ -177,14 +177,16 @@ class PyramidAttentionBroadcastTesterMixin(CacheTesterMixin):
         device = "cpu"  # ensure determinism for the device-dependent torch.Generator
         num_layers = 2
         components = self.get_dummy_components(num_layers=num_layers)
-        for key in components:
-            if "text_encoder" in key and hasattr(components[key], "eval"):
-                components[key].eval()
         pipe = self.pipeline_class(**components)
         pipe = pipe.to(device)
         pipe.set_progress_bar_config(disable=None)
 
+        # The same pipe is reused across all three passes, so reseed the global RNG before each forward. This
+        # keeps every source of randomness (including any text-encoder dropout) identical across passes, so the
+        # only differences come from PAB itself.
+
         # Run inference without PAB
+        torch.manual_seed(0)
         inputs = self.get_dummy_inputs()
         inputs["num_inference_steps"] = 4
         output = pipe(**inputs)[0]
@@ -197,6 +199,7 @@ class PyramidAttentionBroadcastTesterMixin(CacheTesterMixin):
         denoiser = pipe.transformer if hasattr(pipe, "transformer") else pipe.unet
         denoiser.enable_cache(pab_config)
 
+        torch.manual_seed(0)
         inputs = self.get_dummy_inputs()
         inputs["num_inference_steps"] = 4
         output = pipe(**inputs)[0]
@@ -206,6 +209,7 @@ class PyramidAttentionBroadcastTesterMixin(CacheTesterMixin):
         # Run inference with PAB disabled
         denoiser.disable_cache()
 
+        torch.manual_seed(0)
         inputs = self.get_dummy_inputs()
         inputs["num_inference_steps"] = 4
         output = pipe(**inputs)[0]
