@@ -727,8 +727,7 @@ class DiffusionPipeline(ConfigMixin, PushToHubMixin):
                 class). The overwritten components are passed directly to the pipelines `__init__` method. See example
                 below for more information.
             variant (`str`, *optional*):
-                Load weights from a specified variant filename such as `"fp16"` or `"ema"`. This is ignored when
-                loading `from_flax`.
+                Load weights from a specified variant filename such as `"fp16"` or `"ema"`.
             dduf_file(`str`, *optional*):
                 Load weights from the specified dduf file.
             disable_mmap ('bool', *optional*, defaults to 'False'):
@@ -767,7 +766,6 @@ class DiffusionPipeline(ConfigMixin, PushToHubMixin):
         local_files_only = kwargs.pop("local_files_only", None)
         token = kwargs.pop("token", None)
         revision = kwargs.pop("revision", None)
-        from_flax = kwargs.pop("from_flax", False)
         torch_dtype = kwargs.pop("torch_dtype", None)
         custom_pipeline = kwargs.pop("custom_pipeline", None)
         custom_revision = kwargs.pop("custom_revision", None)
@@ -864,7 +862,6 @@ class DiffusionPipeline(ConfigMixin, PushToHubMixin):
                 local_files_only=local_files_only,
                 token=token,
                 revision=revision,
-                from_flax=from_flax,
                 use_safetensors=use_safetensors,
                 use_onnx=use_onnx,
                 custom_pipeline=custom_pipeline,
@@ -975,14 +972,6 @@ class DiffusionPipeline(ConfigMixin, PushToHubMixin):
 
         init_dict = {k: v for k, v in init_dict.items() if load_module(k, v)}
 
-        # Special case: safety_checker must be loaded separately when using `from_flax`
-        if from_flax and "safety_checker" in init_dict and "safety_checker" not in passed_class_obj:
-            raise NotImplementedError(
-                "The safety checker cannot be automatically loaded when loading weights `from_flax`."
-                " Please, pass `safety_checker=None` to `from_pretrained`, and load the safety checker"
-                " separately if you need it."
-            )
-
         # 5. Throw nice warnings / errors for fast accelerate loading
         if len(unused_kwargs) > 0:
             logger.warning(
@@ -1030,7 +1019,7 @@ class DiffusionPipeline(ConfigMixin, PushToHubMixin):
                 elif isinstance(final_device_map, str):
                     current_device_map = final_device_map
 
-            # 7.2 - now that JAX/Flax is an official framework of the library, we might load from Flax names
+            # 7.2 - some hub checkpoints were saved by the (removed) Flax pipelines and use Flax class names
             class_name = class_name[4:] if class_name.startswith("Flax") else class_name
 
             # 7.3 Define all importable classes
@@ -1070,7 +1059,6 @@ class DiffusionPipeline(ConfigMixin, PushToHubMixin):
                     offload_state_dict=offload_state_dict,
                     model_variants=model_variants,
                     name=name,
-                    from_flax=from_flax,
                     variant=variant,
                     low_cpu_mem_usage=low_cpu_mem_usage,
                     cached_folder=cached_folder,
@@ -1569,8 +1557,7 @@ class DiffusionPipeline(ConfigMixin, PushToHubMixin):
                 guarantee the timeliness or safety of the source, and you should refer to the mirror site for more
                 information.
             variant (`str`, *optional*):
-                Load weights from a specified variant filename such as `"fp16"` or `"ema"`. This is ignored when
-                loading `from_flax`.
+                Load weights from a specified variant filename such as `"fp16"` or `"ema"`.
             dduf_file(`str`, *optional*):
                 Load weights from the specified DDUF file.
             use_safetensors (`bool`, *optional*, defaults to `None`):
@@ -1604,7 +1591,6 @@ class DiffusionPipeline(ConfigMixin, PushToHubMixin):
         local_files_only = kwargs.pop("local_files_only", None)
         token = kwargs.pop("token", None)
         revision = kwargs.pop("revision", None)
-        from_flax = kwargs.pop("from_flax", False)
         custom_pipeline = kwargs.pop("custom_pipeline", None)
         custom_revision = kwargs.pop("custom_revision", None)
         variant = kwargs.pop("variant", None)
@@ -1715,7 +1701,6 @@ class DiffusionPipeline(ConfigMixin, PushToHubMixin):
                 model_folder_names,
                 filenames,
                 use_safetensors,
-                from_flax,
                 allow_pickle,
                 use_onnx,
                 pipeline_class._is_onnx,

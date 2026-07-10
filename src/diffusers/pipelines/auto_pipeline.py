@@ -480,8 +480,7 @@ class AutoPipelineForText2Image(ConfigMixin):
                 class). The overwritten components are passed directly to the pipelines `__init__` method. See example
                 below for more information.
             variant (`str`, *optional*):
-                Load weights from a specified variant filename such as `"fp16"` or `"ema"`. This is ignored when
-                loading `from_flax`.
+                Load weights from a specified variant filename such as `"fp16"` or `"ema"`.
 
         > [!TIP] > To use private or [gated](https://huggingface.co/docs/hub/models-gated#gated-models) models, log-in
         with `hf > auth login`.
@@ -771,8 +770,7 @@ class AutoPipelineForImage2Image(ConfigMixin):
                 class). The overwritten components are passed directly to the pipelines `__init__` method. See example
                 below for more information.
             variant (`str`, *optional*):
-                Load weights from a specified variant filename such as `"fp16"` or `"ema"`. This is ignored when
-                loading `from_flax`.
+                Load weights from a specified variant filename such as `"fp16"` or `"ema"`.
 
         > [!TIP] > To use private or [gated](https://huggingface.co/docs/hub/models-gated#gated-models) models, log-in
         with `hf > auth login`.
@@ -1076,8 +1074,7 @@ class AutoPipelineForInpainting(ConfigMixin):
                 class). The overwritten components are passed directly to the pipelines `__init__` method. See example
                 below for more information.
             variant (`str`, *optional*):
-                Load weights from a specified variant filename such as `"fp16"` or `"ema"`. This is ignored when
-                loading `from_flax`.
+                Load weights from a specified variant filename such as `"fp16"` or `"ema"`.
 
         > [!TIP] > To use private or [gated](https://huggingface.co/docs/hub/models-gated#gated-models) models, log-in
         with `hf > auth login`.
@@ -1366,8 +1363,7 @@ class AutoPipelineForText2Audio(ConfigMixin):
                 class). The overwritten components are passed directly to the pipelines `__init__` method. See example
                 below for more information.
             variant (`str`, *optional*):
-                Load weights from a specified variant filename such as `"fp16"` or `"ema"`. This is ignored when
-                loading `from_flax`.
+                Load weights from a specified variant filename such as `"fp16"` or `"ema"`.
 
         > [!TIP] > To use private or [gated](https://huggingface.co/docs/hub/models-gated#gated-models) models, log-in
         with `hf > auth login`.

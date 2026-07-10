@@ -629,17 +629,6 @@ class VariantCompatibleSiblingsTest(unittest.TestCase):
         )
         assert model_filenames == set(filenames)
 
-    def test_download_flax_models(self):
-        ignore_patterns = ["*.safetensors", "*.bin"]
-        filenames = [
-            "vae/diffusion_flax_model.msgpack",
-            "unet/diffusion_flax_model.msgpack",
-        ]
-        model_filenames, variant_filenames = variant_compatible_siblings(
-            filenames, variant=None, ignore_patterns=ignore_patterns
-        )
-        assert model_filenames == set(filenames)
-
 
 class ProgressBarTests(unittest.TestCase):
     def get_dummy_components_image_generation(self):

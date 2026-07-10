@@ -112,32 +112,5 @@ image.save("cat-backpack.png")
 ```
 
 
-## Training with Flax/JAX
-
-For faster training on TPUs and GPUs you can leverage the flax training example. Follow the instructions above to get the model and dataset before running the script.
-
-Before running the scripts, make sure to install the library's training dependencies:
-
-```bash
-pip install -U -r requirements_flax.txt
-```
-
-```bash
-export MODEL_NAME="duongna/stable-diffusion-v1-4-flax"
-export DATA_DIR="path-to-dir-containing-images"
-
-python textual_inversion_flax.py \
-  --pretrained_model_name_or_path=$MODEL_NAME \
-  --train_data_dir=$DATA_DIR \
-  --learnable_property="object" \
-  --placeholder_token="<cat-toy>" --initializer_token="toy" \
-  --resolution=512 \
-  --train_batch_size=1 \
-  --max_train_steps=3000 \
-  --learning_rate=5.0e-04 --scale_lr \
-  --output_dir="textual_inversion_cat"
-```
-It should be at least 70% faster than the PyTorch script with the same configuration.
-
 ### Training with xformers:
-You can enable memory efficient attention by [installing xFormers](https://github.com/facebookresearch/xformers#installing-xformers) and padding the `--enable_xformers_memory_efficient_attention` argument to the script. This is not available with the Flax/JAX implementation.
+You can enable memory efficient attention by [installing xFormers](https://github.com/facebookresearch/xformers#installing-xformers) and padding the `--enable_xformers_memory_efficient_attention` argument to the script.
