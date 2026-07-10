@@ -1019,15 +1019,12 @@ class DiffusionPipeline(ConfigMixin, PushToHubMixin):
                 elif isinstance(final_device_map, str):
                     current_device_map = final_device_map
 
-            # 7.2 - some hub checkpoints were saved by the (removed) Flax pipelines and use Flax class names
-            class_name = class_name[4:] if class_name.startswith("Flax") else class_name
-
-            # 7.3 Define all importable classes
+            # 7.2 Define all importable classes
             is_pipeline_module = hasattr(pipelines, library_name)
             importable_classes = ALL_IMPORTABLE_CLASSES
             loaded_sub_model = None
 
-            # 7.4 Use passed sub model or load class_name from library_name
+            # 7.3 Use passed sub model or load class_name from library_name
             if name in passed_class_obj:
                 # if the model is in a pipeline module, then we load it from the pipeline
                 # check that passed_class_obj has correct parent class
@@ -1779,7 +1776,6 @@ class DiffusionPipeline(ConfigMixin, PushToHubMixin):
             )
 
             cls_name = cls.load_config(os.path.join(cached_folder, "model_index.json")).get("_class_name", None)
-            cls_name = cls_name[4:] if isinstance(cls_name, str) and cls_name.startswith("Flax") else cls_name
 
             diffusers_module = importlib.import_module(__name__.split(".")[0])
             pipeline_class = getattr(diffusers_module, cls_name, None) if isinstance(cls_name, str) else None

@@ -61,7 +61,6 @@ from diffusers import (
     UniPCMultistepScheduler,
     logging,
 )
-from diffusers.pipelines.pipeline_utils import _get_pipeline_class
 from diffusers.schedulers.scheduling_utils import SCHEDULER_CONFIG_NAME
 from diffusers.utils import CONFIG_NAME, WEIGHTS_NAME, is_transformers_version
 from diffusers.utils.torch_utils import is_compiled_module
@@ -1016,14 +1015,6 @@ class DownloadTests(unittest.TestCase):
             _ = DiffusionPipeline.download(
                 "DDUF/tiny-flux-dev-pipe-dduf", dduf_file="fluxpipeline.dduf", load_connected_pipeline=True
             )
-
-    def test_get_pipeline_class_from_flax(self):
-        flax_config = {"_class_name": "FlaxStableDiffusionPipeline"}
-        config = {"_class_name": "StableDiffusionPipeline"}
-
-        # when loading a PyTorch Pipeline from a FlaxPipeline `model_index.json`, e.g.: https://huggingface.co/hf-internal-testing/tiny-stable-diffusion-lms-pipe/blob/7a9063578b325779f0f1967874a6771caa973cad/model_index.json#L2
-        # we need to make sure that we don't load the Flax Pipeline class, but instead the PyTorch pipeline class
-        assert _get_pipeline_class(DiffusionPipeline, flax_config) == _get_pipeline_class(DiffusionPipeline, config)
 
 
 class CustomPipelineTests(unittest.TestCase):

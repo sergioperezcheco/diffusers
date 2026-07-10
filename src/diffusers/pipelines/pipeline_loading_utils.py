@@ -524,8 +524,6 @@ def _get_pipeline_class(
             "The class name could not be found in the configuration file. Please make sure to pass the correct `class_name`."
         )
 
-    class_name = class_name[4:] if class_name.startswith("Flax") else class_name
-
     pipeline_cls = getattr(diffusers_module, class_name)
 
     if load_connected_pipeline:
@@ -670,9 +668,6 @@ def _get_final_device_map(device_map, pipeline_class, passed_class_obj, init_dic
     # Load each module in the pipeline on a meta device so that we can derive the device map.
     init_empty_modules = {}
     for name, (library_name, class_name) in init_dict.items():
-        if class_name.startswith("Flax"):
-            raise ValueError("Flax pipelines are not supported with `device_map`.")
-
         # Define all importable classes
         is_pipeline_module = hasattr(pipelines, library_name)
         importable_classes = ALL_IMPORTABLE_CLASSES
