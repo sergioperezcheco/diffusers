@@ -10,7 +10,6 @@ from transformers import AutoConfig, AutoTokenizer, CLIPTextConfig, CLIPTextMode
 
 from diffusers import (
     AutoencoderKL,
-    FasterCacheConfig,
     FlowMatchEulerDiscreteScheduler,
     FluxPipeline,
     FluxTransformer2DModel,
@@ -336,13 +335,13 @@ class TestFluxPipelineFasterCache(FluxPipelineTesterConfig, FasterCacheTesterMix
     """FasterCache tests for the Flux pipeline."""
 
     # Flux is guidance-distilled, so the FasterCache tester must skip the low/high-frequency-delta state checks.
-    faster_cache_config = FasterCacheConfig(
-        spatial_attention_block_skip_range=2,
-        spatial_attention_timestep_skip_range=(-1, 901),
-        unconditional_batch_skip_range=2,
-        attention_weight_callback=lambda _: 0.5,
-        is_guidance_distilled=True,
-    )
+    FASTER_CACHE_CONFIG = {
+        "spatial_attention_block_skip_range": 2,
+        "spatial_attention_timestep_skip_range": (-1, 901),
+        "unconditional_batch_skip_range": 2,
+        "attention_weight_callback": lambda _: 0.5,
+        "is_guidance_distilled": True,
+    }
 
 
 class TestFluxPipelineFirstBlockCache(FluxPipelineTesterConfig, FirstBlockCacheTesterMixin):

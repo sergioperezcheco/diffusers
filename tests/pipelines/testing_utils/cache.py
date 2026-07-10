@@ -32,9 +32,14 @@ from ...testing_utils import CaptureLogger, assert_tensors_close, is_cache
 class CacheTesterMixin:
     """
     Shared machinery for cache-hook tester mixins. Each cache backend subclasses this and supplies its own config,
-    mirroring the model-level `cache.py` layout. The denoiser-level enable/disable inference comparison is shared
-    via `_test_cache_inference`; backend-specific state/layer checks live on the subclasses.
+    mirroring the model-level `cache.py` layout. Backends store their config *kwargs* as a dict class attribute and
+    build a fresh config instance per test via `_get_cache_config()`; a shared config instance would leak per-test
+    mutations (e.g. `current_timestep_callback`) across tests. The denoiser-level enable/disable inference comparison
+    is shared via `_test_cache_inference`; backend-specific state/layer checks live on the subclasses.
     """
+
+    def _get_cache_config(self):
+        raise NotImplementedError("Subclass must implement `_get_cache_config`.")
 
     def _test_cache_inference(self, cache_config, num_inference_steps, expected_atol=0.1, set_timestep_callback=False):
         device = "cpu"  # ensure determinism for the device-dependent torch.Generator
@@ -89,11 +94,14 @@ class CacheTesterMixin:
 
 @is_cache
 class PyramidAttentionBroadcastTesterMixin(CacheTesterMixin):
-    pab_config = PyramidAttentionBroadcastConfig(
-        spatial_attention_block_skip_range=2,
-        spatial_attention_timestep_skip_range=(100, 800),
-        spatial_attention_block_identifiers=["transformer_blocks"],
-    )
+    PAB_CONFIG = {
+        "spatial_attention_block_skip_range": 2,
+        "spatial_attention_timestep_skip_range": (100, 800),
+        "spatial_attention_block_identifiers": ["transformer_blocks"],
+    }
+
+    def _get_cache_config(self):
+        return PyramidAttentionBroadcastConfig(**self.PAB_CONFIG)
 
     def test_pyramid_attention_broadcast_layers(self):
         num_layers = 0
@@ -111,16 +119,17 @@ class PyramidAttentionBroadcastTesterMixin(CacheTesterMixin):
         pipe = self.pipeline_class(**components)
         pipe.set_progress_bar_config(disable=None)
 
-        self.pab_config.current_timestep_callback = lambda: pipe.current_timestep
+        pab_config = self._get_cache_config()
+        pab_config.current_timestep_callback = lambda: pipe.current_timestep
         denoiser = pipe.transformer if hasattr(pipe, "transformer") else pipe.unet
-        denoiser.enable_cache(self.pab_config)
+        denoiser.enable_cache(pab_config)
 
         expected_hooks = 0
-        if self.pab_config.spatial_attention_block_skip_range is not None:
+        if pab_config.spatial_attention_block_skip_range is not None:
             expected_hooks += num_layers + num_single_layers
-        if self.pab_config.temporal_attention_block_skip_range is not None:
+        if pab_config.temporal_attention_block_skip_range is not None:
             expected_hooks += num_layers + num_single_layers
-        if self.pab_config.cross_attention_block_skip_range is not None:
+        if pab_config.cross_attention_block_skip_range is not None:
             expected_hooks += num_layers + num_single_layers
 
         denoiser = pipe.transformer if hasattr(pipe, "transformer") else pipe.unet
@@ -183,9 +192,10 @@ class PyramidAttentionBroadcastTesterMixin(CacheTesterMixin):
         original_image_slice = torch.cat((original_image_slice[:8], original_image_slice[-8:]))
 
         # Run inference with PAB enabled
-        self.pab_config.current_timestep_callback = lambda: pipe.current_timestep
+        pab_config = self._get_cache_config()
+        pab_config.current_timestep_callback = lambda: pipe.current_timestep
         denoiser = pipe.transformer if hasattr(pipe, "transformer") else pipe.unet
-        denoiser.enable_cache(self.pab_config)
+        denoiser.enable_cache(pab_config)
 
         inputs = self.get_dummy_inputs()
         inputs["num_inference_steps"] = 4
@@ -220,12 +230,15 @@ class PyramidAttentionBroadcastTesterMixin(CacheTesterMixin):
 
 @is_cache
 class FasterCacheTesterMixin(CacheTesterMixin):
-    faster_cache_config = FasterCacheConfig(
-        spatial_attention_block_skip_range=2,
-        spatial_attention_timestep_skip_range=(-1, 901),
-        unconditional_batch_skip_range=2,
-        attention_weight_callback=lambda _: 0.5,
-    )
+    FASTER_CACHE_CONFIG = {
+        "spatial_attention_block_skip_range": 2,
+        "spatial_attention_timestep_skip_range": (-1, 901),
+        "unconditional_batch_skip_range": 2,
+        "attention_weight_callback": lambda _: 0.5,
+    }
+
+    def _get_cache_config(self):
+        return FasterCacheConfig(**self.FASTER_CACHE_CONFIG)
 
     def test_faster_cache_basic_warning_or_errors_raised(self):
         components = self.get_dummy_components()
@@ -248,7 +261,7 @@ class FasterCacheTesterMixin(CacheTesterMixin):
 
     def test_faster_cache_inference(self, expected_atol: float = 0.1):
         self._test_cache_inference(
-            self.faster_cache_config, num_inference_steps=4, expected_atol=expected_atol, set_timestep_callback=True
+            self._get_cache_config(), num_inference_steps=4, expected_atol=expected_atol, set_timestep_callback=True
         )
 
     def test_faster_cache_state(self):
@@ -269,13 +282,14 @@ class FasterCacheTesterMixin(CacheTesterMixin):
         pipe = self.pipeline_class(**components)
         pipe.set_progress_bar_config(disable=None)
 
-        self.faster_cache_config.current_timestep_callback = lambda: pipe.current_timestep
-        pipe.transformer.enable_cache(self.faster_cache_config)
+        faster_cache_config = self._get_cache_config()
+        faster_cache_config.current_timestep_callback = lambda: pipe.current_timestep
+        pipe.transformer.enable_cache(faster_cache_config)
 
         expected_hooks = 0
-        if self.faster_cache_config.spatial_attention_block_skip_range is not None:
+        if faster_cache_config.spatial_attention_block_skip_range is not None:
             expected_hooks += num_layers + num_single_layers
-        if self.faster_cache_config.temporal_attention_block_skip_range is not None:
+        if faster_cache_config.temporal_attention_block_skip_range is not None:
             expected_hooks += num_layers + num_single_layers
 
         # Check if faster_cache denoiser hook is attached
@@ -305,7 +319,7 @@ class FasterCacheTesterMixin(CacheTesterMixin):
                 if name == "":
                     # Root denoiser module
                     state = module._diffusers_hook.get_hook(_FASTER_CACHE_DENOISER_HOOK).state
-                    if not self.faster_cache_config.is_guidance_distilled:
+                    if not faster_cache_config.is_guidance_distilled:
                         assert state.low_frequency_delta is not None, "Low frequency delta should be set."
                         assert state.high_frequency_delta is not None, "High frequency delta should be set."
                 else:
@@ -345,35 +359,44 @@ class FasterCacheTesterMixin(CacheTesterMixin):
 class FirstBlockCacheTesterMixin(CacheTesterMixin):
     # threshold is intentionally set higher than usual values since we're testing with random unconverged models
     # that will not satisfy the expected properties of the denoiser for caching to be effective
-    first_block_cache_config = FirstBlockCacheConfig(threshold=0.8)
+    FIRST_BLOCK_CACHE_CONFIG = {"threshold": 0.8}
+
+    def _get_cache_config(self):
+        return FirstBlockCacheConfig(**self.FIRST_BLOCK_CACHE_CONFIG)
 
     def test_first_block_cache_inference(self, expected_atol: float = 0.1):
-        self._test_cache_inference(self.first_block_cache_config, num_inference_steps=4, expected_atol=expected_atol)
+        self._test_cache_inference(self._get_cache_config(), num_inference_steps=4, expected_atol=expected_atol)
 
 
 @is_cache
 class TaylorSeerCacheTesterMixin(CacheTesterMixin):
-    taylorseer_cache_config = TaylorSeerCacheConfig(
-        cache_interval=5,
-        disable_cache_before_step=10,
-        max_order=1,
-        taylor_factors_dtype=torch.bfloat16,
-        use_lite_mode=True,
-    )
+    TAYLORSEER_CACHE_CONFIG = {
+        "cache_interval": 5,
+        "disable_cache_before_step": 10,
+        "max_order": 1,
+        "taylor_factors_dtype": torch.bfloat16,
+        "use_lite_mode": True,
+    }
+
+    def _get_cache_config(self):
+        return TaylorSeerCacheConfig(**self.TAYLORSEER_CACHE_CONFIG)
 
     def test_taylorseer_cache_inference(self, expected_atol: float = 0.1):
-        self._test_cache_inference(self.taylorseer_cache_config, num_inference_steps=50, expected_atol=expected_atol)
+        self._test_cache_inference(self._get_cache_config(), num_inference_steps=50, expected_atol=expected_atol)
 
 
 @is_cache
 class MagCacheTesterMixin(CacheTesterMixin):
-    mag_cache_config = MagCacheConfig(
-        threshold=0.06,
-        max_skip_steps=3,
-        retention_ratio=0.2,
-        num_inference_steps=50,
-        mag_ratios=torch.ones(50),
-    )
+    MAG_CACHE_CONFIG = {
+        "threshold": 0.06,
+        "max_skip_steps": 3,
+        "retention_ratio": 0.2,
+        "num_inference_steps": 50,
+        "mag_ratios": torch.ones(50),
+    }
+
+    def _get_cache_config(self):
+        return MagCacheConfig(**self.MAG_CACHE_CONFIG)
 
     def test_mag_cache_inference(self, expected_atol: float = 0.1):
-        self._test_cache_inference(self.mag_cache_config, num_inference_steps=50, expected_atol=expected_atol)
+        self._test_cache_inference(self._get_cache_config(), num_inference_steps=50, expected_atol=expected_atol)
