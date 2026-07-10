@@ -100,12 +100,6 @@ class Flux2LoopDenoiser(ModularPipelineBlocks):
                 type_hint=torch.Tensor,
                 description="4D position IDs for latent tokens (T, H, W, L)",
             ),
-            InputParam(
-                "t",
-                required=True,
-                type_hint=torch.Tensor,
-                description="The current timestep, provided by the denoise loop scope.",
-            ),
         ]
 
     @property
@@ -113,7 +107,9 @@ class Flux2LoopDenoiser(ModularPipelineBlocks):
         return [OutputParam("noise_pred", type_hint=torch.Tensor, description="The predicted noise for this step")]
 
     @torch.no_grad()
-    def __call__(self, components: Flux2ModularPipeline, state: PipelineState) -> PipelineState:
+    def __call__(
+        self, components: Flux2ModularPipeline, state: PipelineState, i: int, t: torch.Tensor
+    ) -> PipelineState:
         block_state = self.get_block_state(state)
 
         latents = block_state.latents
@@ -126,7 +122,7 @@ class Flux2LoopDenoiser(ModularPipelineBlocks):
             image_latent_ids = block_state.image_latent_ids
             img_ids = torch.cat([img_ids, image_latent_ids], dim=1)
 
-        timestep = block_state.t.expand(latents.shape[0]).to(latents.dtype)
+        timestep = t.expand(latents.shape[0]).to(latents.dtype)
 
         noise_pred = components.transformer(
             hidden_states=latent_model_input,
@@ -200,12 +196,6 @@ class Flux2KleinLoopDenoiser(ModularPipelineBlocks):
                 type_hint=torch.Tensor,
                 description="4D position IDs for latent tokens (T, H, W, L)",
             ),
-            InputParam(
-                "t",
-                required=True,
-                type_hint=torch.Tensor,
-                description="The current timestep, provided by the denoise loop scope.",
-            ),
         ]
 
     @property
@@ -213,7 +203,9 @@ class Flux2KleinLoopDenoiser(ModularPipelineBlocks):
         return [OutputParam("noise_pred", type_hint=torch.Tensor, description="The predicted noise for this step")]
 
     @torch.no_grad()
-    def __call__(self, components: Flux2KleinModularPipeline, state: PipelineState) -> PipelineState:
+    def __call__(
+        self, components: Flux2KleinModularPipeline, state: PipelineState, i: int, t: torch.Tensor
+    ) -> PipelineState:
         block_state = self.get_block_state(state)
 
         latents = block_state.latents
@@ -226,7 +218,7 @@ class Flux2KleinLoopDenoiser(ModularPipelineBlocks):
             image_latent_ids = block_state.image_latent_ids
             img_ids = torch.cat([img_ids, image_latent_ids], dim=1)
 
-        timestep = block_state.t.expand(latents.shape[0]).to(latents.dtype)
+        timestep = t.expand(latents.shape[0]).to(latents.dtype)
 
         noise_pred = components.transformer(
             hidden_states=latent_model_input,
@@ -333,18 +325,6 @@ class Flux2KleinBaseLoopDenoiser(ModularPipelineBlocks):
                 type_hint=int,
                 description="The number of inference steps, used to set the guider state.",
             ),
-            InputParam(
-                "t",
-                required=True,
-                type_hint=torch.Tensor,
-                description="The current timestep, provided by the denoise loop scope.",
-            ),
-            InputParam(
-                "i",
-                required=True,
-                type_hint=int,
-                description="The current step index, provided by the denoise loop scope.",
-            ),
         ]
 
     @property
@@ -352,7 +332,9 @@ class Flux2KleinBaseLoopDenoiser(ModularPipelineBlocks):
         return [OutputParam("noise_pred", type_hint=torch.Tensor, description="The predicted noise for this step")]
 
     @torch.no_grad()
-    def __call__(self, components: Flux2KleinModularPipeline, state: PipelineState) -> PipelineState:
+    def __call__(
+        self, components: Flux2KleinModularPipeline, state: PipelineState, i: int, t: torch.Tensor
+    ) -> PipelineState:
         block_state = self.get_block_state(state)
 
         latents = block_state.latents
@@ -365,7 +347,6 @@ class Flux2KleinBaseLoopDenoiser(ModularPipelineBlocks):
             image_latent_ids = block_state.image_latent_ids
             img_ids = torch.cat([img_ids, image_latent_ids], dim=1)
 
-        t = block_state.t
         timestep = t.expand(latents.shape[0]).to(latents.dtype)
 
         guider_inputs = {
@@ -379,9 +360,7 @@ class Flux2KleinBaseLoopDenoiser(ModularPipelineBlocks):
             ),
         }
 
-        components.guider.set_state(
-            step=block_state.i, num_inference_steps=block_state.num_inference_steps, timestep=t
-        )
+        components.guider.set_state(step=i, num_inference_steps=block_state.num_inference_steps, timestep=t)
         guider_state = components.guider.prepare_inputs(guider_inputs)
 
         for guider_state_batch in guider_state:
@@ -438,12 +417,6 @@ class Flux2LoopAfterDenoiser(ModularPipelineBlocks):
                 type_hint=torch.Tensor,
                 description="The predicted noise for this step.",
             ),
-            InputParam(
-                "t",
-                required=True,
-                type_hint=torch.Tensor,
-                description="The current timestep, provided by the denoise loop scope.",
-            ),
         ]
 
     @property
@@ -451,13 +424,13 @@ class Flux2LoopAfterDenoiser(ModularPipelineBlocks):
         return [OutputParam("latents", type_hint=torch.Tensor, description="The denoised latents")]
 
     @torch.no_grad()
-    def __call__(self, components: Flux2ModularPipeline, state: PipelineState):
+    def __call__(self, components: Flux2ModularPipeline, state: PipelineState, i: int, t: torch.Tensor):
         block_state = self.get_block_state(state)
 
         latents_dtype = block_state.latents.dtype
         block_state.latents = components.scheduler.step(
             block_state.noise_pred,
-            block_state.t,
+            t,
             block_state.latents,
             return_dict=False,
         )[0]
@@ -474,7 +447,7 @@ class Flux2DenoiseLoopWrapper(IterativePipelineBlocks):
     model_name = "flux2"
 
     @property
-    def loop_locals(self) -> list[str]:
+    def loop_variables(self) -> list[str]:
         return ["i", "t"]
 
     @property
@@ -513,20 +486,17 @@ class Flux2DenoiseLoopWrapper(IterativePipelineBlocks):
             len(block_state.timesteps) - block_state.num_inference_steps * components.scheduler.order, 0
         )
 
-        with state.loop_scope():
-            with self.progress_bar(total=block_state.num_inference_steps) as progress_bar:
-                for i, t in enumerate(block_state.timesteps):
-                    state.set_local("i", i)
-                    state.set_local("t", t)
-                    components, state = self.loop_step(components, state)
+        with self.progress_bar(total=block_state.num_inference_steps) as progress_bar:
+            for i, t in enumerate(block_state.timesteps):
+                components, state = self.loop_step(components, state, i=i, t=t)
 
-                    if i == len(block_state.timesteps) - 1 or (
-                        (i + 1) > num_warmup_steps and (i + 1) % components.scheduler.order == 0
-                    ):
-                        progress_bar.update()
+                if i == len(block_state.timesteps) - 1 or (
+                    (i + 1) > num_warmup_steps and (i + 1) % components.scheduler.order == 0
+                ):
+                    progress_bar.update()
 
-                    if XLA_AVAILABLE:
-                        xm.mark_step()
+                if XLA_AVAILABLE:
+                    xm.mark_step()
 
         return components, state
 

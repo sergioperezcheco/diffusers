@@ -26,7 +26,9 @@ from diffusers.modular_pipelines import (
 
 
 # Dummy blocks modeled on the Helios chunk-loop use case: an outer autoregressive chunk loop
-# (history carried across chunks) containing a full inner timestep denoising loop.
+# (history carried across chunks) containing a full inner timestep denoising loop. Loop variables
+# (`k` for the chunk loop, `i`/`t` for the timestep loop) are passed to leaf sub-blocks as call
+# arguments; every leaf sub-block of a loop must accept its loop's variables.
 
 
 class ChunkNoiseGenStep(ModularPipelineBlocks):
@@ -34,10 +36,7 @@ class ChunkNoiseGenStep(ModularPipelineBlocks):
 
     @property
     def inputs(self):
-        return [
-            InputParam(name="history", required=True),
-            InputParam(name="k", required=True, description="Chunk index, provided by the chunk loop scope."),
-        ]
+        return [InputParam(name="history", required=True)]
 
     @property
     def intermediate_outputs(self):
@@ -47,9 +46,9 @@ class ChunkNoiseGenStep(ModularPipelineBlocks):
     def description(self):
         return "prepares this chunk's latents from the history"
 
-    def __call__(self, components, state):
+    def __call__(self, components, state, k):
         block_state = self.get_block_state(state)
-        block_state.chunk_latents = block_state.history + block_state.k
+        block_state.chunk_latents = block_state.history + k
         self.set_block_state(state, block_state)
         return components, state
 
@@ -59,10 +58,7 @@ class LoopDenoiserStep(ModularPipelineBlocks):
 
     @property
     def inputs(self):
-        return [
-            InputParam(name="chunk_latents", required=True),
-            InputParam(name="t", required=True, description="Current timestep, provided by the denoise loop scope."),
-        ]
+        return [InputParam(name="chunk_latents", required=True)]
 
     @property
     def intermediate_outputs(self):
@@ -72,9 +68,9 @@ class LoopDenoiserStep(ModularPipelineBlocks):
     def description(self):
         return "predicts the noise for one timestep"
 
-    def __call__(self, components, state):
+    def __call__(self, components, state, i, t):
         block_state = self.get_block_state(state)
-        block_state.noise_pred = block_state.chunk_latents * 0 + block_state.t
+        block_state.noise_pred = block_state.chunk_latents * 0 + t
         self.set_block_state(state, block_state)
         return components, state
 
@@ -94,7 +90,7 @@ class LoopSchedulerStep(ModularPipelineBlocks):
     def description(self):
         return "updates the chunk latents with the noise prediction"
 
-    def __call__(self, components, state):
+    def __call__(self, components, state, i, t):
         block_state = self.get_block_state(state)
         block_state.chunk_latents = block_state.chunk_latents + block_state.noise_pred
         self.set_block_state(state, block_state)
@@ -113,21 +109,18 @@ class InnerDenoiseLoop(IterativePipelineBlocks):
         return "inner timestep loop"
 
     @property
-    def loop_inputs(self):
-        return [InputParam(name="timesteps", required=True)]
+    def loop_variables(self):
+        return ["i", "t"]
 
     @property
-    def loop_locals(self):
-        return ["i", "t"]
+    def loop_inputs(self):
+        return [InputParam(name="timesteps", required=True)]
 
     @torch.no_grad()
     def __call__(self, components, state):
         block_state = self.get_block_state(state)
-        with state.loop_scope():
-            for i, t in enumerate(block_state.timesteps):
-                state.set_local("i", i)
-                state.set_local("t", t)
-                components, state = self.loop_step(components, state)
+        for i, t in enumerate(block_state.timesteps):
+            components, state = self.loop_step(components, state, i=i, t=t)
         return components, state
 
 
@@ -146,7 +139,7 @@ class ChunkUpdateStep(ModularPipelineBlocks):
     def description(self):
         return "records the denoised chunk and updates the history"
 
-    def __call__(self, components, state):
+    def __call__(self, components, state, k):
         block_state = self.get_block_state(state)
         block_state.history = block_state.chunk_latents
         block_state.latent_chunks = [*(block_state.latent_chunks or []), float(block_state.chunk_latents)]
@@ -166,32 +159,30 @@ class ChunkLoop(IterativePipelineBlocks):
         return "outer autoregressive chunk loop"
 
     @property
-    def loop_inputs(self):
-        return [InputParam(name="num_latent_chunk", required=True)]
+    def loop_variables(self):
+        return ["k"]
 
     @property
-    def loop_locals(self):
-        return ["k"]
+    def loop_inputs(self):
+        return [InputParam(name="num_latent_chunk", required=True)]
 
     @torch.no_grad()
     def __call__(self, components, state):
         block_state = self.get_block_state(state)
-        with state.loop_scope():
-            for k in range(block_state.num_latent_chunk):
-                state.set_local("k", k)
-                components, state = self.loop_step(components, state)
+        for k in range(block_state.num_latent_chunk):
+            components, state = self.loop_step(components, state, k=k)
         return components, state
 
 
 class TestIterativePipelineBlocksStructure:
-    def test_loop_inputs_and_locals_aggregation(self):
+    def test_loop_inputs_aggregation(self):
         loop = ChunkLoop()
         input_names = [p.name for p in loop.inputs]
 
         # loop_inputs of the loop itself and of the nested loop are surfaced
         assert "num_latent_chunk" in input_names
         assert "timesteps" in input_names
-        # values provided through the loop scopes are not user inputs
+        # loop variables are call arguments, not inputs
         assert "k" not in input_names
         assert "i" not in input_names
         assert "t" not in input_names
@@ -227,7 +218,7 @@ class TestIterativePipelineBlocksExecution:
         # the cross-chunk carry persists as a declared output
         assert float(state.get("history")) == 12.0
 
-    def test_loop_locals_do_not_leak_into_state(self):
+    def test_loop_variables_do_not_leak_into_state(self):
         pipe = self._make_pipeline()
         state = pipe(num_latent_chunk=2, timesteps=torch.tensor([1.0]), history=torch.tensor(0.0))
 
@@ -236,8 +227,47 @@ class TestIterativePipelineBlocksExecution:
         # declared sub-block outputs persist after the loop (last iteration's value)
         assert state.get("noise_pred") is not None
 
-    def test_loop_sub_block_standalone_requires_loop_locals(self):
-        # outside a loop scope, a block that declares a loop-provided input fails with a clear error
+    def test_leaf_signature_is_validated(self):
+        class PlainStep(ModularPipelineBlocks):
+            model_name = "test"
+
+            @property
+            def description(self):
+                return "regular block without the loop variables"
+
+            def __call__(self, components, state):
+                return components, state
+
+        class BadLoop(IterativePipelineBlocks):
+            model_name = "test"
+            block_classes = [PlainStep]
+            block_names = ["plain"]
+
+            @property
+            def description(self):
+                return "loop with a mismatched leaf signature"
+
+            @property
+            def loop_variables(self):
+                return ["i", "t"]
+
+            @property
+            def loop_inputs(self):
+                return [InputParam(name="timesteps", required=True)]
+
+            @torch.no_grad()
+            def __call__(self, components, state):
+                block_state = self.get_block_state(state)
+                for i, t in enumerate(block_state.timesteps):
+                    components, state = self.loop_step(components, state, i=i, t=t)
+                return components, state
+
+        pipe = SequentialPipelineBlocks.from_blocks_dict({"loop": BadLoop()}).init_pipeline()
+        with pytest.raises(ValueError, match="must accept the loop variables"):
+            pipe(timesteps=torch.tensor([1.0]))
+
+    def test_loop_leaf_standalone_raises(self):
+        # outside a loop, a leaf block with loop variables in its signature cannot run
         pipe = SequentialPipelineBlocks.from_blocks_dict({"denoiser": LoopDenoiserStep()}).init_pipeline()
-        with pytest.raises(ValueError, match="Required input 't' is missing"):
+        with pytest.raises(TypeError):
             pipe(chunk_latents=torch.tensor(1.0))
