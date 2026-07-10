@@ -454,22 +454,35 @@ def render_gif(
         for pi, (t, (widths, finals)) in enumerate(zip(trajs, boards)):
             x0 = pi * (pw + gap)
             i = round(f * (len(t["frames"]) - 1) / max(n_frames - 1, 1))
-            d.text((x0 + margin, 20), t["label"], font=head, fill=LABEL)
-            d.text((x0 + margin, 20 + ch), t["subtitle"], font=font, fill=SUB)
-            prompt_line = "prompt: " + " ".join(t["prompt"].split())
-            d.text((x0 + margin, 20 + 2 * ch), prompt_line[:cols], font=font, fill=(196, 200, 210))
+            # The header lines are single lines, so truncate them to the panel width or they spill into the next panel.
+            inner = pw - 2 * margin
 
-            legend = [("at final token", "converged"), ("rewriting", "changed"), ("noise", "noisy")]
-            if t["mask_token_id"] is not None:
-                legend.append(("masked", "mask"))
-            else:
-                legend.append(("block not started", "pending"))
-            lx = x0 + margin
+            def _fit(text, fnt, max_px=inner):
+                if d.textlength(text, font=fnt) <= max_px:
+                    return text
+                while text and d.textlength(text + "…", font=fnt) > max_px:
+                    text = text[:-1]
+                return text + "…"
+
+            d.text((x0 + margin, 20), _fit(t["label"], head), font=head, fill=LABEL)
+            d.text((x0 + margin, 20 + ch), _fit(t["subtitle"], font), font=font, fill=SUB)
+            d.text(
+                (x0 + margin, 20 + 2 * ch),
+                _fit("prompt: " + " ".join(t["prompt"].split()), font),
+                font=font,
+                fill=(196, 200, 210),
+            )
+
+            legend = [("final", "converged"), ("rewriting", "changed"), ("noise", "noisy")]
+            legend.append(("masked", "mask") if t["mask_token_id"] is not None else ("not started", "pending"))
+            lx, right = x0 + margin, x0 + pw - margin
             for text, state in legend:
+                if lx + cw * 0.8 + 4 + probe.textlength(text, font=font) > right:
+                    break  # drop legend items that would overflow the panel
                 d.rectangle([lx, 24 + 3 * ch, lx + cw * 0.8, 24 + 3 * ch + cw * 0.8], fill=STATE_COLOR[state])
-                lx += cw * 1.6
+                lx += cw * 1.4
                 d.text((lx, 20 + 3 * ch), text, font=font, fill=SUB)
-                lx += probe.textlength(text, font=font) + cw * 1.6
+                lx += probe.textlength(text, font=font) + cw * 1.4
 
             rng = random.Random(1000 + f)  # noise re-rolls each frame, so un-converged text shimmers
             blk = max(t.get("block_length") or 1, 1)
