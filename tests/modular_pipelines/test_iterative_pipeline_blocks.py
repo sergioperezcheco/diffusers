@@ -98,7 +98,11 @@ class LoopSchedulerStep(ModularPipelineBlocks):
 
 
 class InnerDenoiseLoop(IterativePipelineBlocks):
-    """Inner timestep loop — itself an assembled loop block, nested inside the chunk loop."""
+    """Inner timestep loop — itself an assembled loop block, nested inside the chunk loop.
+
+    Like every sub-block of the chunk loop, it accepts the outer loop variable `k` (and ignores it);
+    its own sub-blocks accept its own loop variables `i` / `t` instead.
+    """
 
     model_name = "test"
     block_classes = [LoopDenoiserStep, LoopSchedulerStep]
@@ -117,7 +121,7 @@ class InnerDenoiseLoop(IterativePipelineBlocks):
         return [InputParam(name="timesteps", required=True)]
 
     @torch.no_grad()
-    def __call__(self, components, state):
+    def __call__(self, components, state, k):
         block_state = self.get_block_state(state)
         for i, t in enumerate(block_state.timesteps):
             components, state = self.loop_step(components, state, i=i, t=t)

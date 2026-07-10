@@ -1334,15 +1334,14 @@ class IterativePipelineBlocks(SequentialPipelineBlocks):
     ```
 
     Unlike [`LoopSequentialPipelineBlocks`], sub-blocks operate on the full [`PipelineState`] with the regular
-    `get_block_state`/`set_block_state` behavior, and can be leaf or assembled blocks
-    (`SequentialPipelineBlocks`, `ConditionalPipelineBlocks`, another `IterativePipelineBlocks`, ...) — so loops
-    can be nested and composed freely.
+    `get_block_state`/`set_block_state` behavior, so an `IterativePipelineBlocks` can itself be a sub-block of
+    another one — loops can be nested and composed freely.
 
-    Loop variables are passed to leaf sub-blocks as call arguments: every leaf sub-block must have the signature
+    Loop variables are passed to sub-blocks as call arguments: every sub-block must have the signature
     `__call__(self, components, state, <loop_variables...>)`, which is validated against `loop_variables` before
-    the first iteration. Assembled sub-blocks are called with the regular `(components, state)` interface and do
-    not receive the loop variables — a nested loop passes its own `loop_variables` to its own sub-blocks.
-    Sub-block outputs are written to the pipeline state as usual and persist after the loop.
+    the first iteration. A nested loop accepts the outer loop's variables in its own hand-written `__call__`
+    (ignoring or forwarding them) and passes its own `loop_variables` to its own sub-blocks. Sub-block outputs
+    are written to the pipeline state as usual and persist after the loop.
 
     > [!WARNING] > This is an experimental feature and is likely to change in the future.
 
@@ -1405,12 +1404,9 @@ class IterativePipelineBlocks(SequentialPipelineBlocks):
         return expected_configs
 
     def _validate_loop_step_signatures(self):
-        """Every leaf sub-block must accept exactly the loop variables after `(components, state)`."""
+        """Every sub-block must accept exactly the loop variables after `(components, state)`."""
         expected = set(self.loop_variables)
         for block_name, block in self.sub_blocks.items():
-            if block.sub_blocks:
-                # assembled sub-blocks are called with the regular (components, state) interface
-                continue
             params = list(inspect.signature(block.__call__).parameters)
             extra = set(params[2:])
             if extra != expected:
@@ -1421,18 +1417,14 @@ class IterativePipelineBlocks(SequentialPipelineBlocks):
                 )
 
     def loop_step(self, components, state: PipelineState, **loop_kwargs) -> PipelineState:
-        """Run all sub-blocks once over the pipeline state (one loop iteration), passing the loop variables to
-        leaf sub-blocks."""
+        """Run all sub-blocks once over the pipeline state (one loop iteration), passing the loop variables."""
         if not getattr(self, "_loop_signatures_validated", False):
             self._validate_loop_step_signatures()
             self._loop_signatures_validated = True
 
         for block_name, block in self.sub_blocks.items():
             try:
-                if block.sub_blocks:
-                    components, state = block(components, state)
-                else:
-                    components, state = block(components, state, **loop_kwargs)
+                components, state = block(components, state, **loop_kwargs)
             except Exception as e:
                 error_msg = (
                     f"\nError in block: ({block_name}, {block.__class__.__name__})\n"
