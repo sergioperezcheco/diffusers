@@ -437,8 +437,92 @@ Note that the use of [`StableDiffusionLoraLoaderMixin.load_lora_weights`](https:
 
 * LoRA parameters that have separate identifiers for the UNet and the text encoder such as: [`"sayakpaul/dreambooth"`](https://huggingface.co/sayakpaul/dreambooth).
 
+## Training with Flax/JAX
+
+> [!WARNING]
+> JAX/Flax support was removed from the `diffusers` library in v0.40.0. These scripts require `diffusers<=0.39.x` to run.
+
+For faster training on TPUs and GPUs you can leverage the flax training example. Follow the instructions above to get the model and dataset before running the script.
+
+____Note: The flax example don't yet support features like gradient checkpoint, gradient accumulation etc, so to use flax for faster training we will need >30GB cards.___
+
+
+Before running the scripts, make sure to install the library's training dependencies:
+
+```bash
+pip install -U -r requirements_flax.txt
+```
+
+
+### Training without prior preservation loss
+
+```bash
+export MODEL_NAME="duongna/stable-diffusion-v1-4-flax"
+export INSTANCE_DIR="dog"
+export OUTPUT_DIR="path-to-save-model"
+
+python train_dreambooth_flax.py \
+  --pretrained_model_name_or_path=$MODEL_NAME  \
+  --instance_data_dir=$INSTANCE_DIR \
+  --output_dir=$OUTPUT_DIR \
+  --instance_prompt="a photo of sks dog" \
+  --resolution=512 \
+  --train_batch_size=1 \
+  --learning_rate=5e-6 \
+  --max_train_steps=400
+```
+
+
+### Training with prior preservation loss
+
+```bash
+export MODEL_NAME="duongna/stable-diffusion-v1-4-flax"
+export INSTANCE_DIR="dog"
+export CLASS_DIR="path-to-class-images"
+export OUTPUT_DIR="path-to-save-model"
+
+python train_dreambooth_flax.py \
+  --pretrained_model_name_or_path=$MODEL_NAME  \
+  --instance_data_dir=$INSTANCE_DIR \
+  --class_data_dir=$CLASS_DIR \
+  --output_dir=$OUTPUT_DIR \
+  --with_prior_preservation --prior_loss_weight=1.0 \
+  --instance_prompt="a photo of sks dog" \
+  --class_prompt="a photo of dog" \
+  --resolution=512 \
+  --train_batch_size=1 \
+  --learning_rate=5e-6 \
+  --num_class_images=200 \
+  --max_train_steps=800
+```
+
+
+### Fine-tune text encoder with the UNet.
+
+```bash
+export MODEL_NAME="duongna/stable-diffusion-v1-4-flax"
+export INSTANCE_DIR="dog"
+export CLASS_DIR="path-to-class-images"
+export OUTPUT_DIR="path-to-save-model"
+
+python train_dreambooth_flax.py \
+  --pretrained_model_name_or_path=$MODEL_NAME  \
+  --train_text_encoder \
+  --instance_data_dir=$INSTANCE_DIR \
+  --class_data_dir=$CLASS_DIR \
+  --output_dir=$OUTPUT_DIR \
+  --with_prior_preservation --prior_loss_weight=1.0 \
+  --instance_prompt="a photo of sks dog" \
+  --class_prompt="a photo of dog" \
+  --resolution=512 \
+  --train_batch_size=1 \
+  --learning_rate=2e-6 \
+  --num_class_images=200 \
+  --max_train_steps=800
+```
+
 ### Training with xformers:
-You can enable memory efficient attention by [installing xFormers](https://github.com/facebookresearch/xformers#installing-xformers) and padding the `--enable_xformers_memory_efficient_attention` argument to the script.
+You can enable memory efficient attention by [installing xFormers](https://github.com/facebookresearch/xformers#installing-xformers) and padding the `--enable_xformers_memory_efficient_attention` argument to the script. This is not available with the Flax/JAX implementation.
 
 You can also use Dreambooth to train the specialized in-painting model. See [the script in the research folder for details](https://github.com/huggingface/diffusers/tree/main/examples/research_projects/dreambooth_inpaint).
 
