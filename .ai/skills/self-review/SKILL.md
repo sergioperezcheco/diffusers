@@ -3,7 +3,7 @@ name: self-review
 description: >
   Use before opening a PR, or whenever asked to self-review a diffusers
   contribution. Applies the same rubric as the `@claude` CI (checks the diff
-  against .ai/review-rules.md, traces call paths for dead code). Reports findings grouped by
+  against the project review rules, traces call paths for dead code). Reports findings grouped by
   severity, flagging what to fix before submitting (blocking issues + dead code)
   vs what to leave for the actual review. Report-only — does not edit files.
 ---
@@ -29,9 +29,10 @@ files, scope to your own commits: `git log main..HEAD --oneline`, then
 
 ## 2. Read the rubric
 
-`.ai/review-rules.md` is the canonical rubric (the CI pins it from `main`) — read
-it and review against it; don't rely on a remembered copy. For the areas you
-touched, also read `.ai/models.md`, `.ai/pipelines.md`, or `.ai/modular.md`.
+[review-rules.md](../../review-rules.md) is the canonical rubric (the CI pins it
+from `main`) — read it and review against it; don't rely on a remembered copy.
+For the areas you touched, also read [models.md](../../models.md),
+[pipelines.md](../../pipelines.md), or [modular.md](../../modular.md).
 
 ## 3. Report
 
