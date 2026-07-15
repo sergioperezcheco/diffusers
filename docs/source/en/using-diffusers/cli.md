@@ -95,12 +95,12 @@ diffusers-cli run \
   [Pipeline data types](../using-diffusers/loading#pipeline-data-types).
 - `--device-map <value>` — component placement. Accepts a torch device string (`cuda`, `cuda:0`, `cpu`, `mps`),
   `balanced` (auto-splits components across visible GPUs), or a JSON dict for explicit per-component placement.
-  Auto-detected if omitted. See [device_map](../training/distributed_inference#device_map) for details on the
-  `balanced`/`auto` strategies.
+  Auto-detected if omitted. See [device_map](../training/distributed_inference#device_map) for more details
 - `--variant fp16` — pick a weight variant.
 - `--revision <sha>` — pin a specific model revision.
 - `--trust-remote-code` — allow custom code from the Hub (required for repos that ship custom pipeline classes
-  or modular blocks). See [Community pipelines](../using-diffusers/custom_pipeline_overview).
+  or modular blocks). See [Community pipelines](../using-diffusers/custom_pipeline_overview) for standard custom
+  pipelines and [Modular Diffusers](../modular_diffusers/overview).
 - `--lora <spec>` — attach one or more LoRA adapters after loading. Accepts a single JSON object
   or a list of them. `lora_id` is required per entry; `lora_scale` defaults to `1.0`; `adapter_name`
   is optional (auto-generated as `lora_<i>` when stacking).
