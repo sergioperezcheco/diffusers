@@ -121,7 +121,15 @@ HF_JOBS_KEYS = frozenset(
 
 def _add_loading_arguments(parser: ArgumentParser) -> None:
     parser.add_argument("--model", "-m", required=True, help="Model id on the Hugging Face Hub or local path.")
-    parser.add_argument("--device", default=None, help="Device to run on (e.g. cpu, cuda, cuda:0, mps).")
+    parser.add_argument(
+        "--device-map",
+        default=None,
+        help=(
+            "Component placement. Accepts a torch device string (`cuda`, `cuda:0`, `cpu`, `mps`), "
+            "`balanced` for pipeline-level auto-split across visible GPUs, or a JSON dict of "
+            '`{"<component>": <device>}` for explicit per-component placement. Auto-detected if omitted.'
+        ),
+    )
     parser.add_argument("--dtype", default="auto", choices=DTYPE_CHOICES, help="Torch dtype for pipeline weights.")
     parser.add_argument("--variant", default=None, help='Optional weight variant (e.g. "fp16").')
     parser.add_argument("--revision", default=None, help="Model revision (branch, tag, or commit SHA).")
@@ -131,9 +139,11 @@ def _add_loading_arguments(parser: ArgumentParser) -> None:
         "--lora",
         default=None,
         help=(
-            "JSON object describing a LoRA adapter to attach after the pipeline loads. "
-            'Shape: {"lora_id": "<hub-id-or-path>", "lora_scale": <float>}. '
-            'Example: \'{"lora_id": "alvdansen/littletinies", "lora_scale": 0.8}\'.'
+            "JSON spec describing one or more LoRA adapters to attach after the pipeline loads. "
+            'Single: \'{"lora_id": "<id>", "lora_scale": <float>}\'. '
+            'Multiple: \'[{"lora_id": "a/b", "lora_scale": 0.5, "adapter_name": "a"}, '
+            '{"lora_id": "c/d", "lora_scale": 0.3}]\'. `adapter_name` is optional (defaults '
+            "to `lora_<i>` when stacking).`lora_scale` defaults to 1.0."
         ),
     )
 
@@ -171,16 +181,15 @@ def _add_optimization_arguments(parser: ArgumentParser) -> None:
     parser.add_argument(
         "--compile",
         nargs="?",
-        const='{"mode": "max-autotune-no-cudagraphs"}',
+        const='{"fullgraph": true}',
         default=None,
         metavar="JSON",
         help=(
             "torch.compile every denoiser submodule on the pipeline. Accepts an optional JSON "
             'object of kwargs forwarded to `torch.compile`, e.g. \'{"mode": "max-autotune", '
-            '"fullgraph": true}\'. Bare `--compile` uses `mode=max-autotune-no-cudagraphs` — '
-            "CUDA Graphs break with regional/repeated-block compile because sequential blocks "
-            "overwrite each other's output buffers. Adds a one-time compilation cost on the first "
-            "step but speeds up every subsequent step — worth it for multi-step generation (50+ steps)."
+            '"fullgraph": true}\'. Bare `--compile` uses `fullgraph=true`. Adds a one-time '
+            "compilation cost on the first step but speeds up every subsequent step — worth it "
+            "for multi-step generation (50+ steps)."
         ),
     )
 
@@ -277,43 +286,54 @@ def _resolve_dtype(name: str | None):
     return mapping[name]
 
 
-def _resolve_device(name: str | None) -> str:
-    if name:
-        return name
+def _resolve_device_map(raw: str | None) -> str | dict:
+    """Parse `--device-map` into a value acceptable by `from_pretrained(device_map=...)`.
 
-    from diffusers.utils.torch_utils import torch_device
+    Returns a JSON dict if the value looks like one, `"balanced"` verbatim, or a single-device string (e.g. `"cuda"`,
+    `"cuda:1"`, `"cpu"`, `"mps"`). Auto-detects when `raw is None`, pinning to `cuda:$LOCAL_RANK` under torchrun.
+    """
+    if raw is None:
+        from diffusers.utils.torch_utils import torch_device
 
-    # Under torchrun, LOCAL_RANK identifies this process's assigned GPU. Without this
-    # pin every rank falls back to cuda:0 and OOMs as the pipeline replicates onto a
-    # single device. Only applies to cuda — torch_device already handles npu/xpu/mps/etc.
-    if torch_device == "cuda":
-        local_rank = os.environ.get("LOCAL_RANK")
-        if local_rank is not None:
-            import torch
+        if torch_device == "cuda":
+            local_rank = os.environ.get("LOCAL_RANK")
+            if local_rank is not None:
+                import torch
 
-            torch.cuda.set_device(int(local_rank))
-            return f"cuda:{local_rank}"
-    return torch_device
+                torch.cuda.set_device(int(local_rank))
+                return f"cuda:{local_rank}"
+        return torch_device
+
+    if raw.strip().startswith("{"):
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as e:
+            raise SystemExit(f"--device-map must be a device string or a JSON dict: {e}") from e
+        if not isinstance(parsed, dict):
+            raise SystemExit("--device-map JSON must decode to an object.")
+        return parsed
+
+    return raw
 
 
-def _map_to_device(pipeline: Any, args: Namespace, device: str) -> Any:
-    """Move the pipeline to `device`, or hand off to the chosen CPU-offload helper."""
-    if args.cpu_offload is None:
-        return pipeline.to(device)
+def _apply_cpu_offload(pipeline: Any, mode: str, device_map: str | dict) -> None:
+    """Apply model or group CPU offload. Requires a single-device target (not balanced or dict)."""
+    if not isinstance(device_map, str) or device_map == "balanced":
+        raise SystemExit(
+            "--cpu-offload requires --device-map to be a single device string (e.g. 'cuda'); "
+            f"got {device_map!r}. balanced/dict placement is incompatible with CPU offload."
+        )
 
-    if args.cpu_offload == "model":
-        pipeline.enable_model_cpu_offload(device=device)
-
-    elif args.cpu_offload == "group":
+    if mode == "model":
+        pipeline.enable_model_cpu_offload(device=device_map)
+    elif mode == "group":
         import torch
 
         pipeline.enable_group_offload(
-            onload_device=torch.device(device),
+            onload_device=torch.device(device_map),
             offload_type="leaf_level",
             use_stream=True,
         )
-
-    return pipeline
 
 
 def _set_attention_backend(pipeline: Any, backend: str) -> None:
@@ -327,10 +347,10 @@ def _set_attention_backend(pipeline: Any, backend: str) -> None:
     try:
         transformer.set_attention_backend(backend)
     except (ValueError, ImportError, RuntimeError) as e:
-        raise SystemExit(
-            f"Failed to set attention backend {backend!r}: {type(e).__name__}: {e}. "
-            f"Allowed backends: {', '.join(ATTENTION_BACKEND_CHOICES)}."
-        ) from e
+        logger.warning(
+            f"Attention backend {backend!r} could not be set on {type(transformer).__name__}: "
+            f"{type(e).__name__}: {e}. Falling back to the model's default backend."
+        )
 
 
 def _enable_context_parallel(pipeline: Any) -> None:
@@ -374,7 +394,10 @@ def _apply_optimizations(pipeline: Any, args: Namespace) -> None:
     if args.context_parallel:
         _enable_context_parallel(pipeline)
     if args.compile is not None:
-        _compile_denoiser(pipeline, args.compile)
+        if args.context_parallel:
+            logger.warning("--compile is currently not supported with --context-parallel; skipping compile.")
+        else:
+            _compile_denoiser(pipeline, args.compile)
 
 
 def _compile_denoiser(pipeline: Any, compile_spec: str) -> None:
@@ -412,31 +435,53 @@ def _compile_denoiser(pipeline: Any, compile_spec: str) -> None:
 
 
 def _load_lora(pipeline: Any, args: Namespace) -> None:
-    """Attach a LoRA adapter from a JSON spec like `{"lora_id": "...", "lora_scale": 0.8}`."""
+    """Attach one or more LoRA adapters from a JSON spec.
+
+    Accepts either a single object or a list of objects. Each entry supports: `lora_id` (required), `lora_scale`
+    (optional float), `adapter_name` (optional; auto-generated as `lora_<i>` if omitted). Multiple adapters are stacked
+    via a single `set_adapters(...)` call.
+    """
     if not args.lora:
         return
     try:
-        spec = json.loads(args.lora)
+        parsed = json.loads(args.lora)
     except json.JSONDecodeError as e:
         raise SystemExit(f"--lora must be valid JSON: {e}") from e
-    if not isinstance(spec, dict):
-        raise SystemExit("--lora must decode to a JSON object.")
-    lora_id = spec.get("lora_id")
-    if not lora_id:
-        raise SystemExit("--lora must include a 'lora_id' field.")
+
+    specs = parsed if isinstance(parsed, list) else [parsed]
+    if not all(isinstance(s, dict) for s in specs):
+        raise SystemExit("--lora must decode to a JSON object or list of objects.")
     if not hasattr(pipeline, "load_lora_weights"):
         raise SystemExit(f"{type(pipeline).__name__} does not support LoRA loading.")
 
-    pipeline.load_lora_weights(lora_id, adapter_name="default")
-    scale = spec.get("lora_scale")
-    if scale is not None and hasattr(pipeline, "set_adapters"):
-        pipeline.set_adapters(["default"], adapter_weights=[float(scale)])
+    names: list[str] = []
+    scales: list[float] = []
+    for i, spec in enumerate(specs):
+        lora_id = spec.get("lora_id")
+        if not lora_id:
+            raise SystemExit(f"--lora entry {i} is missing 'lora_id'.")
+        adapter_name = spec.get("adapter_name") or (f"lora_{i}" if len(specs) > 1 else "default")
+        pipeline.load_lora_weights(lora_id, adapter_name=adapter_name)
+        names.append(adapter_name)
+        scales.append(float(spec.get("lora_scale", 1.0)))
+
+    if hasattr(pipeline, "set_adapters"):
+        pipeline.set_adapters(names, adapter_weights=scales)
 
 
-def _load_pipeline(args: Namespace, modular: bool) -> Any:
+def _load_pipeline(args: Namespace) -> Any:
     import diffusers
 
+    # Detect modular repos by trying the standard config; `ModularPipeline` repos ship
+    # `modular_model_index.json` instead of `model_index.json`, so `load_config` OSErrors.
+    try:
+        diffusers.DiffusionPipeline.load_config(args.model, token=args.token, revision=args.revision)
+        modular = False
+    except OSError:
+        modular = True
+
     dtype = _resolve_dtype(args.dtype)
+    device_map = _resolve_device_map(args.device_map)
     common_kwargs: dict[str, Any] = {
         "trust_remote_code": args.trust_remote_code,
     }
@@ -446,6 +491,9 @@ def _load_pipeline(args: Namespace, modular: bool) -> Any:
         common_kwargs["variant"] = args.variant
     if args.token:
         common_kwargs["token"] = args.token
+    # CPU offload sets up its own placement hooks, so leave weights on CPU at load time.
+    if not args.cpu_offload:
+        common_kwargs["device_map"] = device_map
 
     if modular:
         # ModularPipeline.from_pretrained fetches only the pipeline config; component
@@ -463,7 +511,8 @@ def _load_pipeline(args: Namespace, modular: bool) -> Any:
         pipeline = diffusers.DiffusionPipeline.from_pretrained(args.model, revision=args.revision, **common_kwargs)
 
     _load_lora(pipeline, args)
-    pipeline = _map_to_device(pipeline, args, _resolve_device(args.device))
+    if args.cpu_offload:
+        _apply_cpu_offload(pipeline, args.cpu_offload, device_map)
     _apply_optimizations(pipeline, args)
 
     return pipeline
@@ -1056,14 +1105,6 @@ class RunCommand(BaseDiffusersCLICommand):
 
         _get_or_create_run_id()  # populate RUN_ID_ENV so local output dir + remote bucket prefix agree
 
-        try:
-            diffusers.DiffusionPipeline.load_config(
-                self.args.model, token=self.args.token, revision=self.args.revision
-            )
-            is_modular = False
-        except OSError:
-            is_modular = True
-
         call_kwargs = _parse_pipeline_kwargs(self.args.pipeline_kwargs)
 
         if _maybe_submit_remote(self.args, self.task):
@@ -1072,7 +1113,8 @@ class RunCommand(BaseDiffusersCLICommand):
         # Resolve media before loading pipeline weights so dead URLs / missing files fail
         # fast — cheap to fetch, expensive to load a 20GB model just to hit a 404.
         _resolve_media_inputs(call_kwargs)
-        pipeline = _load_pipeline(self.args, modular=is_modular)
+        pipeline = _load_pipeline(self.args)
+        is_modular = isinstance(pipeline, diffusers.ModularPipeline)
 
         if self.args.output_key is not None:
             call_kwargs["output"] = self.args.output_key

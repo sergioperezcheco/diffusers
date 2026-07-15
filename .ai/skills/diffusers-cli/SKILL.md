@@ -41,8 +41,8 @@ diffusers-cli env --help
 
 - Multi-stage workflows where you need intermediate tensor manipulation between pipelines → write Python.
 - Training or fine-tuning → CLI only covers inference.
-- Anything requiring custom `device_map`, `quantization_config`, or other low-level loader knobs not exposed by
-  the CLI flags → write Python.
+- Anything requiring `quantization_config` or other low-level loader knobs not exposed by the CLI flags → write
+  Python. (`device_map` is exposed as `--device-map`; see [run.md](run.md#optimization-flags).)
 
 ## Verifying the CLI is installed
 

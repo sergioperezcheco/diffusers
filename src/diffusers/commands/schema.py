@@ -82,13 +82,18 @@ def _schema(args: Namespace) -> None:
             kwargs["revision"] = args.revision
         if args.token:
             kwargs["token"] = args.token
+
+        # If the repo declares custom code + external dependencies, surface them upfront so
+        # the user knows what to install before we hit an ImportError inside from_pretrained.
+        _warn_custom_block_requirements(args)
+
         try:
             blocks = diffusers.ModularPipelineBlocks.from_pretrained(args.model, **kwargs)
         except Exception as e:
+            hint = "\nPass --trust-remote-code if it ships custom block code." if not args.trust_remote_code else ""
             raise SystemExit(
                 f"Could not read schema for {args.model!r}: no {diffusers.DiffusionPipeline.config_name} and "
-                f"loading as a modular pipeline failed ({type(e).__name__}: {e}). "
-                "Is this a diffusers pipeline repo? Pass --trust-remote-code if it ships custom block code."
+                f"loading as a modular pipeline failed with:\n  {type(e).__name__}: {e}{hint}"
             ) from e
 
         class_name = type(blocks).__name__
@@ -116,6 +121,45 @@ def _schema(args: Namespace) -> None:
                 out.text(f"    type: {entry['type_hint']}")
             if entry["description"]:
                 out.text(f"    desc: {entry['description']}")
+
+
+def _warn_custom_block_requirements(args: Namespace) -> None:
+    """Warn upfront when a modular block ships custom code with declared external dependencies.
+
+    Reads `modular_config.json` if present; if it has an `auto_map` (custom code) and a non-empty `requirements`
+    list/dict, prints a heads-up. `from_pretrained` will otherwise fail with an `ImportError` deep in the loader stack
+    when a listed dep is missing.
+    """
+    import diffusers
+
+    try:
+        config = diffusers.ModularPipelineBlocks.load_config(args.model, token=args.token, revision=args.revision)
+    except Exception:
+        return  # no modular_config.json or unreachable — nothing to warn about
+    if not isinstance(config, dict):
+        return
+    if not config.get("auto_map"):
+        return
+    requirements = config.get("requirements")
+    if not requirements:
+        return
+
+    # `requirements` may be a dict {name: version} or (older repos) a list of [name, version] pairs.
+    if isinstance(requirements, dict):
+        pairs = list(requirements.items())
+    elif isinstance(requirements, list):
+        pairs = [(item[0], item[1]) for item in requirements if isinstance(item, (list, tuple)) and len(item) >= 2]
+    else:
+        pairs = []
+    if not pairs:
+        return
+
+    formatted = ", ".join(f"{name}=={version}" for name, version in pairs)
+    print(
+        f"[diffusers-cli] {args.model!r} ships custom block code with external dependencies: {formatted}. "
+        "You will need to install these in order to determine the pipeline schema.",
+        flush=True,
+    )
 
 
 def _parse_docstring_args(docstring: str | None) -> dict[str, str]:

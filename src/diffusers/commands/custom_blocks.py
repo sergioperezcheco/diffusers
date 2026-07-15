@@ -123,10 +123,8 @@ class CustomBlocksCommand(BaseDiffusersCLICommand):
             if not isinstance(node, ast.ClassDef):
                 continue
 
-            # extract all base names for this class
             base_names = [bname for b in node.bases if (bname := self._get_base_name(b)) is not None]
 
-            # for each allowed base that appears in the class's bases, emit a tuple
             for allowed in EXPECTED_PARENT_CLASSES:
                 if allowed in base_names:
                     results.append((node.name, allowed))
