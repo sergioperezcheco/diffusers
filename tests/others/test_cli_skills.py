@@ -34,6 +34,7 @@ from diffusers.commands.skills import (
 SAMPLE_BUNDLE = {
     "SKILL.md": b"---\nname: example-skill\ndescription: An example skill.\n---\n\n# Example\n",
     "extra.md": b"# Extra reference file\n",
+    "reference/script.py": b"print('hello from a nested reference')\n",
 }
 
 
@@ -44,6 +45,7 @@ class TestInstallSkill:
         assert location == skill_dir
         assert (skill_dir / "SKILL.md").read_bytes() == SAMPLE_BUNDLE["SKILL.md"]
         assert (skill_dir / "extra.md").read_bytes() == SAMPLE_BUNDLE["extra.md"]
+        assert (skill_dir / "reference" / "script.py").read_bytes() == SAMPLE_BUNDLE["reference/script.py"]
         assert (skill_dir / _MANAGED_MARKER_FILE).exists()
 
     def test_errors_without_force_on_existing_dir(self, tmp_path):

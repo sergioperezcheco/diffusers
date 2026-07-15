@@ -25,6 +25,7 @@ from diffusers.commands.custom_blocks import CustomBlocksCommand
 from diffusers.commands.run import (
     _build_task_kwargs,
     _kwargs_to_argv,
+    _load_pipeline,
     _parse_pipeline_kwargs,
     _resolve_dtype,
     _resolve_media_inputs,
@@ -120,7 +121,6 @@ class TestRunCommand:
 
     @require_torch_gpu
     def test_group_offload_arg(self):
-        from diffusers.commands.run import _load_pipeline
         from diffusers.hooks.group_offloading import _is_group_offload_enabled
 
         args = self._parse_run_argv(["--cpu-offload", "group"])
@@ -131,30 +131,22 @@ class TestRunCommand:
     def test_model_cpu_offload_arg(self):
         import accelerate
 
-        from diffusers.commands.run import _load_pipeline
-
         args = self._parse_run_argv(["--cpu-offload", "model"])
         pipeline = _load_pipeline(args)
         assert isinstance(pipeline.transformer._hf_hook, accelerate.hooks.CpuOffload)
 
     def test_vae_tiling_arg(self):
-        from diffusers.commands.run import _load_pipeline
-
         args = self._parse_run_argv(["--vae-tiling"])
         pipeline = _load_pipeline(args)
         assert pipeline.vae.use_tiling is True
 
     def test_vae_slicing_arg(self):
-        from diffusers.commands.run import _load_pipeline
-
         args = self._parse_run_argv(["--vae-slicing"])
         pipeline = _load_pipeline(args)
         assert pipeline.vae.use_slicing is True
 
     @require_torch_gpu
     def test_compile_arg(self):
-        from diffusers.commands.run import _load_pipeline
-
         args = self._parse_run_argv(["--compile"])
         pipeline = _load_pipeline(args)
         # `_compile_denoiser` either applies `torch.compile` (which wraps the module in an
@@ -168,8 +160,6 @@ class TestRunCommand:
 
     @require_torch_gpu
     def test_attention_backend_arg(self):
-        from diffusers.commands.run import _load_pipeline
-
         args = self._parse_run_argv(["--attention-backend", "flash_hub"])
         pipeline = _load_pipeline(args)
         # `set_attention_backend` stamps each attention processor's `_attention_backend` attr.
