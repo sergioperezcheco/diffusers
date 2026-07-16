@@ -59,6 +59,7 @@ from ..quantizers import PipelineQuantizationConfig
 from ..quantizers.bitsandbytes.utils import _check_bnb_status
 from ..schedulers.scheduling_utils import SCHEDULER_CONFIG_NAME
 from ..utils import (
+    _TORCH_DTYPE_DEPRECATION_MESSAGE,
     CONFIG_NAME,
     DEPRECATED_REVISION_ARGS,
     BaseOutput,
@@ -592,7 +593,7 @@ class DiffusionPipeline(ConfigMixin, PushToHubMixin):
                     " is not recommended to move them to `cpu` as running them will fail. Please make"
                     " sure to use an accelerator to run the pipeline in inference, due to the lack of"
                     " support for`float16` operations on this device in PyTorch. Please, remove the"
-                    " `torch_dtype=torch.float16` argument, or use another device for inference."
+                    " `dtype=torch.float16` argument, or use another device for inference."
                 )
         return self
 
@@ -784,7 +785,13 @@ class DiffusionPipeline(ConfigMixin, PushToHubMixin):
         from_flax = kwargs.pop("from_flax", False)
         torch_dtype = kwargs.pop("torch_dtype", None)
         dtype = kwargs.pop("dtype", None)
-        torch_dtype = dtype if dtype is not None else torch_dtype
+        if torch_dtype is not None:
+            if dtype is not None:
+                raise ValueError(
+                    "You have passed both `dtype` and `torch_dtype`. Please only pass `dtype`, `torch_dtype` is deprecated."
+                )
+            deprecate("torch_dtype", "1.0.0", _TORCH_DTYPE_DEPRECATION_MESSAGE)
+            dtype = torch_dtype
         custom_pipeline = kwargs.pop("custom_pipeline", None)
         custom_revision = kwargs.pop("custom_revision", None)
         provider = kwargs.pop("provider", None)
@@ -805,11 +812,9 @@ class DiffusionPipeline(ConfigMixin, PushToHubMixin):
         disable_mmap = kwargs.pop("disable_mmap", False)
         trust_remote_code = kwargs.pop("trust_remote_code", False)
 
-        if torch_dtype is not None and not isinstance(torch_dtype, dict) and not isinstance(torch_dtype, torch.dtype):
-            torch_dtype = torch.float32
-            logger.warning(
-                f"Passed `torch_dtype` {torch_dtype} is not a `torch.dtype`. Defaulting to `torch.float32`."
-            )
+        if dtype is not None and not isinstance(dtype, dict) and not isinstance(dtype, torch.dtype):
+            logger.warning(f"Passed `dtype` {dtype} is not a `torch.dtype`. Defaulting to `torch.float32`.")
+            dtype = torch.float32
 
         if low_cpu_mem_usage and not is_accelerate_available():
             low_cpu_mem_usage = False
@@ -1019,7 +1024,7 @@ class DiffusionPipeline(ConfigMixin, PushToHubMixin):
                 init_dict=init_dict,
                 library=library,
                 max_memory=max_memory,
-                torch_dtype=torch_dtype,
+                dtype=dtype,
                 cached_folder=cached_folder,
                 force_download=force_download,
                 proxies=proxies,
@@ -1067,9 +1072,7 @@ class DiffusionPipeline(ConfigMixin, PushToHubMixin):
             else:
                 # load sub model
                 sub_model_dtype = (
-                    torch_dtype.get(name, torch_dtype.get("default", torch.float32))
-                    if isinstance(torch_dtype, dict)
-                    else torch_dtype
+                    dtype.get(name, dtype.get("default", torch.float32)) if isinstance(dtype, dict) else dtype
                 )
                 loaded_sub_model = load_sub_model(
                     library_name=library_name,
@@ -1078,7 +1081,7 @@ class DiffusionPipeline(ConfigMixin, PushToHubMixin):
                     pipelines=pipelines,
                     is_pipeline_module=is_pipeline_module,
                     pipeline_class=pipeline_class,
-                    torch_dtype=sub_model_dtype,
+                    dtype=sub_model_dtype,
                     provider=provider,
                     sess_options=sess_options,
                     device_map=current_device_map,
@@ -1466,7 +1469,7 @@ class DiffusionPipeline(ConfigMixin, PushToHubMixin):
             >>> from diffusers import DiffusionPipeline
             >>> import torch
 
-            >>> pipe = DiffusionPipeline.from_pretrained("Qwen/Qwen-Image", torch_dtype=torch.bfloat16)
+            >>> pipe = DiffusionPipeline.from_pretrained("Qwen/Qwen-Image", dtype=torch.bfloat16)
 
             >>> pipe.enable_group_offload(
             ...     onload_device=torch.device("cuda"),
@@ -2055,7 +2058,7 @@ class DiffusionPipeline(ConfigMixin, PushToHubMixin):
         >>> from diffusers import DiffusionPipeline
         >>> from xformers.ops import MemoryEfficientAttentionFlashAttentionOp
 
-        >>> pipe = DiffusionPipeline.from_pretrained("stabilityai/stable-diffusion-2-1", torch_dtype=torch.float16)
+        >>> pipe = DiffusionPipeline.from_pretrained("stabilityai/stable-diffusion-2-1", dtype=torch.float16)
         >>> pipe = pipe.to("cuda")
         >>> pipe.enable_xformers_memory_efficient_attention(attention_op=MemoryEfficientAttentionFlashAttentionOp)
         >>> # Workaround for not accepting attention shape using VAE for Flash Attention
@@ -2114,7 +2117,7 @@ class DiffusionPipeline(ConfigMixin, PushToHubMixin):
 
         >>> pipe = StableDiffusionPipeline.from_pretrained(
         ...     "stable-diffusion-v1-5/stable-diffusion-v1-5",
-        ...     torch_dtype=torch.float16,
+        ...     dtype=torch.float16,
         ...     use_safetensors=True,
         ... )
 
@@ -2168,7 +2171,15 @@ class DiffusionPipeline(ConfigMixin, PushToHubMixin):
         original_config = dict(pipeline.config)
         torch_dtype = kwargs.pop("torch_dtype", None)
         dtype = kwargs.pop("dtype", None)
-        torch_dtype = dtype if dtype is not None else (torch_dtype if torch_dtype is not None else torch.float32)
+        if torch_dtype is not None:
+            if dtype is not None:
+                raise ValueError(
+                    "You have passed both `dtype` and `torch_dtype`. Please only pass `dtype`, `torch_dtype` is deprecated."
+                )
+            deprecate("torch_dtype", "1.0.0", _TORCH_DTYPE_DEPRECATION_MESSAGE)
+            dtype = torch_dtype
+        if dtype is None:
+            dtype = torch.float32
         trust_remote_code = kwargs.pop("trust_remote_code", False)
 
         # derive the pipeline class to instantiate
@@ -2266,8 +2277,7 @@ class DiffusionPipeline(ConfigMixin, PushToHubMixin):
             new_pipeline.register_to_config(_name_or_path=pretrained_model_name_or_path)
         new_pipeline.register_to_config(**unused_original_config)
 
-        if torch_dtype is not None:
-            new_pipeline.to(dtype=torch_dtype)
+        new_pipeline.to(dtype=dtype)
 
         return new_pipeline
 

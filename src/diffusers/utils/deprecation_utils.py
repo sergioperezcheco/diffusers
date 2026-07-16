@@ -9,6 +9,8 @@ from ..utils import logging
 
 logger = logging.get_logger(__name__)
 
+_TORCH_DTYPE_DEPRECATION_MESSAGE = "Please use `dtype` instead."
+
 # Mapping for deprecated Transformers classes to their replacements
 # This is used to handle models that reference deprecated class names in their configs
 # Reference: https://github.com/huggingface/transformers/issues/40822
