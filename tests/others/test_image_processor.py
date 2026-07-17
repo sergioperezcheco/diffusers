@@ -308,3 +308,27 @@ class ImageProcessorTest(unittest.TestCase):
         assert out_np.shape == exp_np_shape, (
             f"resized image output shape '{out_np.shape}' didn't match expected shape '{exp_np_shape}'."
         )
+
+    def test_rgblike_to_depthmap_preserves_uint16_range(self):
+        """Test that rgblike_to_depthmap returns uint16 values, not truncated to uint8."""
+        from diffusers.image_processor import VaeImageProcessorLDM3D
+
+        processor = VaeImageProcessorLDM3D()
+
+        # Create a test image where high/low bytes encode a depth > 255
+        # e.g., channel 1 (high byte) = 1, channel 2 (low byte) = 0 → depth = 256
+        h, w = 4, 4
+        img_np = np.zeros((h, w, 3), dtype=np.uint8)
+        img_np[:, :, 1] = 1  # high byte
+        img_np[:, :, 2] = 0  # low byte
+        depth_np = processor.rgblike_to_depthmap(img_np)
+        assert depth_np.dtype == np.uint16, f"Expected uint16, got {depth_np.dtype}"
+        assert depth_np[0, 0] == 256, f"Expected 256, got {depth_np[0, 0]}"
+
+        # Torch variant (H, W, C) layout
+        img_pt = torch.zeros(h, w, 3, dtype=torch.uint8)
+        img_pt[:, :, 1] = 1
+        img_pt[:, :, 2] = 0
+        depth_pt = processor.rgblike_to_depthmap(img_pt)
+        assert depth_pt.dtype == torch.uint16, f"Expected uint16, got {depth_pt.dtype}"
+        assert depth_pt[0, 0].item() == 256, f"Expected 256, got {depth_pt[0, 0].item()}"
