@@ -59,10 +59,9 @@ Does it choose ONE block based on which input is present?
     YES -> AutoPipelineBlocks (simple trigger mapping)
     NO  -> ConditionalPipelineBlocks (custom select_block method)
 
-Does behavior differ per CHECKPOINT (distilled / turbo / a variant with its own schedule),
-not per call?
-  YES -> prefer a separate blocks assembly per variant over a config flag
-         branching inside a shared block (see Key pattern: Checkpoint variants)
+Is it a different CHECKPOINT (distilled / turbo / a variant with its own schedule)?
+  YES -> its own blocks assembly, unless it behaves literally the same
+         (see Key pattern: Checkpoint variants)
 ```
 
 ## Build order (easiest first)
@@ -173,32 +172,11 @@ class AutoDenoise(ConditionalPipelineBlocks):
 
 ## Key pattern: Checkpoint variants
 
-Workflow selection (above) handles behavior that varies **per call** — which inputs the user passed. Behavior that varies **per checkpoint** — a distilled / turbo variant, a schedule baked into the weights — is where modular has a structural advantage over standard pipelines. A standard pipeline has one class per task, so a variant has no choice but to live inside it as `if self.config.is_distilled:` branches. Modular lifts that constraint: give each variant its own blocks assembly, and what a user loads describes exactly the checkpoint in front of them — nothing bundled in from a sibling variant.
+A different checkpoint (distilled / turbo / a variant with its own schedule) can have its own blocks assembly mapped to it: give the variant a `ModularPipeline` subclass carrying its `default_blocks_name`, and checkpoints route to it automatically — via `_class_name` in `modular_model_index.json`, or, for repos that only ship a standard `model_index.json`, a config-keyed map fn in `MODULAR_PIPELINE_MAPPING` (see `_flux2_klein_map_fn`).
 
-Flux2 Klein (guidance-distilled) is the reference: `modular_blocks_flux2_klein.py` composes the *same* base leaf blocks (`Flux2TextInputStep`, `Flux2PrepareLatentsStep`, `Flux2SetTimestepsStep`, ...) and swaps in only what actually differs — a text encoder that doesn't declare `negative_prompt`, a denoise step without a guider. No duplicated code: the variant is a different *composition*, not a different copy.
+Default to taking that option. The only reason not to is when the variant behaves literally the same; if the split buys anything at all — the distilled variant doesn't have to declare `negative_prompt`, doesn't carry a guider, its docs describe exactly what the checkpoint does — make the separate assembly. It costs almost nothing: assemblies compose the same shared leaf blocks, and only the steps that truly differ need new block classes. See `modular_blocks_flux2_klein.py`, which reuses the base flux2 leaf blocks and swaps in just a `negative_prompt`-free text encoder and a guider-free denoise step.
 
-The payoff, concretely:
-
-- `ModularPipeline.from_pretrained("<klein repo>")` returns a pipeline whose declared inputs, components, workflow map, and auto-generated docs *are* the distilled contract — no `negative_prompt` input, no guider component, no docstring caveats like "ignored for distilled checkpoints". The base checkpoint's pipeline keeps its CFG surface. Neither carries the other's baggage.
-- Routing is automatic — users never pick the assembly by hand. Each variant gets a `ModularPipeline` subclass carrying its `default_blocks_name` (e.g. `Flux2KleinModularPipeline`); a modular repo names its class directly via `_class_name` in `modular_model_index.json`, and a repo that only ships a standard `model_index.json` resolves through a config-keyed map fn in `MODULAR_PIPELINE_MAPPING` (see `_flux2_klein_map_fn`, which keys on `is_distilled`).
-- Some differences *only* an assembly can express. A checkpoint's repo can override components and config values per checkpoint through `modular_model_index.json`, but it can never change which inputs the blocks declare — the input surface is baked into the assembly. When the variant should accept different inputs (a guidance-distilled checkpoint shouldn't expose `negative_prompt` at all), the split isn't just cleaner, it's the only mechanism there is.
-
-You *can* still handle a variant the standard-pipeline way — a `ConfigSpec` flag and a branch inside a shared block:
-
-```python
-@property
-def expected_configs(self):
-    return [ConfigSpec(name="is_distilled", default=False)]
-
-def __call__(self, components, state):
-    ...
-    if components.config.is_distilled:
-        mu = 1.15
-    else:
-        mu = calculate_shift(...)
-```
-
-It works, and for a single internal value like the `mu` here it's tolerable (though shipping the value as checkpoint config would remove the branch entirely). But every such branch gives back a piece of the advantage: the declared surface and docs stop describing any one checkpoint, each checkpoint carries the other's code path, and anything the flag can't reach — the input surface — leaks silently (the distilled checkpoint still accepts `negative_prompt` and ignores it). When a variant is a different checkpoint, prefer a different assembly; only the steps that truly differ need new block classes.
+Don't fall back to the standard-pipeline habit of a config flag branching inside a shared block (`ConfigSpec(name="is_distilled")` + `if components.config.is_distilled:`). That keeps both variants' behavior bundled in one blockset — and the input surface is the one thing it can never fix: a repo can override components and config values per checkpoint, but never which inputs the blocks declare, so the distilled checkpoint would still accept `negative_prompt` and silently ignore it.
 
 ## Key pattern: Standalone block reusability
 
@@ -283,7 +261,7 @@ ComponentSpec(
 
 8. **No-op skip logic inside an optional block.** If a step is conditional (e.g. an optional prompt enhancer), don't have the block check a flag at the top of `__call__` and `return` early. Wrap it in an `AutoPipelineBlocks` with `block_trigger_inputs = ["use_xxx"]` so the block is only assembled into the pipeline when the trigger input is provided. The block's own `__call__` should always assume its components and inputs are present.
 
-9. **Serving a checkpoint variant through a config flag in a shared block.** `ConfigSpec(name="is_distilled")` plus `if components.config.is_distilled:` works, but it gives up modular's main advantage — a loaded pipeline that describes exactly its checkpoint — and it cannot express input differences at all (a distilled variant would still accept `negative_prompt`). Suggest a separate blocks assembly per variant instead (see Key pattern: Checkpoint variants); config values are best kept for per-checkpoint *values* the same code path consumes.
+9. **Serving a checkpoint variant through a config flag in a shared block.** `ConfigSpec(name="is_distilled")` plus `if components.config.is_distilled:` bundles two checkpoints' behavior into one blockset — and it can't change the input surface at all (the distilled variant would still accept `negative_prompt`). Suggest a separate blocks assembly for the variant instead (see Key pattern: Checkpoint variants).
 
 ## Conversion checklist
 
