@@ -71,6 +71,17 @@ Is it a different CHECKPOINT (distilled / turbo / a variant with its own schedul
 3. `before_denoise.py` -- Timesteps, latent prep, noise setup. Each logical operation = one block
 4. `denoise.py` -- The hardest. Convert guidance to guider abstraction
 
+## Growing a pipeline: one workflow at a time
+
+Build one workflow end-to-end first (e.g. t2v), then add the next workflow — and later the next blocks assembly / checkpoint variant — one at a time. Each addition should **introduce new blocks rather than modify existing ones**: existing blocks are already wired into working workflows, and a new leaf block plus a new assembly entry can't break them.
+
+The one good reason to touch an existing block is to make it strictly more **general**. Be honest about which direction the edit goes:
+
+- **Adding a branch is not generalizing — it's specializing.** `if components.config.foo:` or `if block_state.image is not None:` inside an existing block means the block now does two things. Add a new block for the new case instead, and let workflow selection or a variant assembly pick between them.
+- **Collapsing duplicates is generalizing.** If two blocks are identical except for which conditioning inputs they pass to the denoiser, don't keep both — rework the one block to take `kwargs_type="denoiser_input_fields"` (see the `kwargs_type` pattern below) so the same block serves every workflow, as the Cosmos3 denoise step does.
+
+Rule of thumb: a generalizing edit *removes* an if/else or a duplicate block. If your edit *adds* an if/else, it's a new block trying to get out.
+
 ## Key pattern: Guider abstraction
 
 Original pipeline has guidance baked in:
