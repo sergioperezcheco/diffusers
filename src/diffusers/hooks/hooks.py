@@ -205,9 +205,14 @@ class HookRegistry:
             )
 
         rewritten_forward = create_new_forward(fn_ref)
-        self._module_ref.forward = functools.update_wrapper(
-            functools.partial(rewritten_forward, self._module_ref), rewritten_forward
-        )
+        # Preserve the original forward's signature/name/docstring so that
+        # inspect.signature(module.forward) and torch.export see the real
+        # parameters instead of the hook wrapper's (module, *args, **kwargs).
+        # We point __wrapped__ at the original forward (captured above before it
+        # was overwritten), which is what inspect.signature follows.
+        wrapped = functools.partial(rewritten_forward, self._module_ref)
+        functools.update_wrapper(wrapped, forward)
+        self._module_ref.forward = wrapped
 
         hook.fn_ref = fn_ref
         self.hooks[name] = hook

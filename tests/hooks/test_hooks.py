@@ -178,6 +178,27 @@ class TestHooks:
         assert len(registry.hooks) == 1
         assert registry._hook_order == ["multiply_hook"]
 
+    def test_register_hook_preserves_forward_signature(self):
+        # register_hook rewires module.forward through a (module, *args, **kwargs)
+        # wrapper. Ensure the wrapped forward keeps the original signature/name so
+        # that inspect.signature and torch.export see the real parameters.
+        import inspect
+
+        model = DummyModel(self.in_features, self.hidden_features, self.out_features, self.num_layers)
+        model.to(torch_device)
+        expected_params = list(inspect.signature(model.forward).parameters)
+
+        registry = HookRegistry.check_if_exists_or_initialize(model)
+        registry.register_hook(AddHook(1), "add_hook")
+        registry.register_hook(MultiplyHook(2), "multiply_hook")
+
+        assert list(inspect.signature(model.forward).parameters) == expected_params
+        assert model.forward.__name__ == "forward"
+
+        # runtime behaviour is unchanged
+        input = torch.randn(1, 4, device=torch_device, generator=self.get_generator())
+        assert model(input).shape == (1, self.out_features)
+
     def test_stateful_hook(self):
         registry = HookRegistry.check_if_exists_or_initialize(self.model)
         registry.register_hook(StatefulAddHook(1), "stateful_add_hook")
